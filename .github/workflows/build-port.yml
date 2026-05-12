@@ -27,15 +27,11 @@ jobs:
           
           URL="${{ github.event.inputs.mod_url }}"
           
-          if [[ "$URL" == *"drive.google.com"* ]]; then
-            ID=$(echo $URL | sed -r 's/.*(\/d\/|id=)([a-zA-Z0-9_-]+).*/\2/')
-            gdown --id "$ID" -O mod-payload.zip || wget -q -O mod-payload.zip "$URL"
-          else
-            curl -L -A "Mozilla/5.0" "$URL" -o mod-payload.zip || wget -q -L "$URL" -O mod-payload.zip
-          fi
+          # gdown handles Drive URLs and IDs natively now without the --id flag
+          gdown "$URL" -O mod-payload.zip --fuzzy || wget -q -L -A "Mozilla/5.0" "$URL" -O mod-payload.zip
           
-          if ! unzip -t mod-payload.zip > /dev/null 2>&1; then
-            echo "ERROR: The downloaded file is not a valid ZIP."
+          if [ ! -f mod-payload.zip ] || ! unzip -t mod-payload.zip > /dev/null 2>&1; then
+            echo "ERROR: Download failed or the file is not a valid ZIP."
             exit 1
           fi
 
@@ -54,7 +50,7 @@ jobs:
       - name: Setup Haxe and System Tools
         run: |
           sudo apt-get update
-          # Using woff-tools instead of ttf2woff
+          # woff-tools provides the conversion utilities for web fonts
           sudo apt-get install fontforge woff-tools -y --no-install-recommends
       
       - name: Install Haxe
@@ -85,11 +81,11 @@ jobs:
           
           haxelib run lime setup
 
-      - name: Patch HTML5 incompatible code (Surgical Logic)
+      - name: Patch HTML5 incompatible code (Deep Fix)
         run: |
           cd engine-source
           
-          # 1. Safe Neutralization of Discord.hx
+          # 1. Neutralize Discord.hx 
           DISCORD_FILE=$(find source -name "Discord.hx")
           if [ -f "$DISCORD_FILE" ]; then
             PACKAGE_NAME=$(grep "package" "$DISCORD_FILE" | head -n 1)
@@ -107,8 +103,7 @@ jobs:
           # 3. Handle Project.xml dependencies
           sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
 
-          # 4. Global Surgical Replacement (Avoids mangling structure)
-          # We use a more specific pattern to avoid the 'Expected }' error
+          # 4. Global Surgical Replacement (Regex avoids mangling brackets)
           find source -name "*.hx" -type f -exec sed -i \
             -e 's/sys\.FileSystem/FileSystem/g' \
             -e 's/sys\.io\.File/File/g' \
