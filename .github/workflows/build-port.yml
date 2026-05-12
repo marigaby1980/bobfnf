@@ -28,11 +28,17 @@ jobs:
           URL="${{ github.event.inputs.mod_url }}"
           
           if [[ "$URL" == *"drive.google.com"* ]]; then
-            gdown "$URL" -O mod-payload.zip
+            ID=$(echo $URL | sed -r 's/.*(\/d\/|id=)([a-zA-Z0-9_-]+).*/\2/')
+            gdown --id "$ID" -O mod-payload.zip || wget -q -O mod-payload.zip "$URL"
           else
-            wget -q -O mod-payload.zip "$URL"
+            curl -L -A "Mozilla/5.0" "$URL" -o mod-payload.zip || wget -q -L "$URL" -O mod-payload.zip
           fi
           
+          if ! unzip -t mod-payload.zip > /dev/null 2>&1; then
+            echo "ERROR: The downloaded file is not a valid ZIP."
+            exit 1
+          fi
+
           echo "Extracting Mod Payload..."
           mkdir -p mods_upload
           unzip -q mod-payload.zip -d mods_upload/
@@ -42,7 +48,6 @@ jobs:
         run: |
           cd engine-source
           mkdir -p mods
-          # Inject the uploaded mod files into the target directories
           cp -rn ../mods_upload/* mods/ || true
           cp -rn ../mods_upload/* assets/ || true
 
@@ -55,28 +60,24 @@ jobs:
         run: |
           cd engine-source
           haxelib setup ~/haxelib
-          
-          # Install and setup the 'hmm' manager
           haxelib install hmm --quiet
           haxelib run hmm setup
           
-          # Check if hmm.json exists; if not, install core dependencies manually
+          # Check for hmm.json but force install essential Psych Engine libs
           if [ -f "hmm.json" ]; then
-            echo "hmm.json found, running automated install..."
-            haxelib run hmm install --quiet
-          else
-            echo "hmm.json not found! Falling back to manual install of Psych Engine dependencies..."
-            haxelib install lime 8.1.1 --quiet
-            haxelib install openfl 9.3.3 --quiet
-            haxelib install flixel 5.6.1 --quiet
-            haxelib install flixel-addons 3.2.2 --quiet
-            haxelib install flixel-ui 2.6.1 --quiet
-            haxelib install hscript 2.5.0 --quiet
-            haxelib install tjson 1.4.0 --quiet
-            haxelib git linc_luajit https://github.com/superpowers04/linc_luajit --quiet
+            haxelib run hmm install --quiet || echo "hmm install failed, continuing manually..."
           fi
+
+          haxelib install lime 8.1.1 --quiet
+          haxelib install openfl 9.3.3 --quiet
+          haxelib install flixel 5.6.1 --quiet
+          haxelib install flixel-addons 3.2.2 --quiet
+          haxelib install flixel-ui 2.6.1 --quiet
+          haxelib install hscript 2.5.0 --quiet
+          haxelib install tjson 1.4.0 --quiet
+          haxelib install flxanimate 3.0.4 --quiet
+          haxelib git linc_luajit https://github.com/superpowers04/linc_luajit --quiet
           
-          # Finalize lime/openfl setup
           haxelib run lime setup
 
       - name: Patch HTML5 incompatible code (Mock Sys)
@@ -95,30 +96,32 @@ jobs:
           echo 'package hxdiscord_rpc; class Types { public static inline var DISCORD_REPLY_NO=0; public static inline var DISCORD_REPLY_YES=1; public static inline var DISCORD_REPLY_IGNORE=2; }' > source/hxdiscord_rpc/Types.hx
           echo 'package hxdiscord_rpc; typedef DiscordPresence = Dynamic;' > source/hxdiscord_rpc/DiscordPresence.hx
 
-          find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g'                                                           -e 's/sys\.io\.File/File/g'                                                           -e 's/sys\.io\.Process/Process/g'                                                           -e 's/sys\.thread\.Thread/Thread/g'                                                           -e 's/sys\.thread\.Mutex/Mutex/g'                                                           -e '/import cpp/d'                                                           -e 's/cpp\.[a-zA-Z0-9_]+/Dynamic/g'                                                           -e '/import llua/d'                                                           -e 's/llua\.[a-zA-Z0-9_]+/Dynamic/g' {} +
-          find . -name "FlxSoundTray.hx" -type f -exec sed -i 's/public function new(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\n&/g' {} +
+          find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g' \
+                                                           -e 's/sys\.io\.File/File/g' \
+                                                           -e 's/sys\.io\.Process/Process/g' \
+                                                           -e 's/sys\.thread\.Thread/Thread/g' \
+                                                           -e 's/sys\.thread\.Mutex/Mutex/g' \
+                                                           -e '/import cpp/d' \
+                                                           -e 's/cpp\.[a-zA-Z0-9_]+/Dynamic/g' \
+                                                           -e '/import llua/d' \
+                                                           -e 's/llua\.[a-zA-Z0-9_]+/Dynamic/g' {} +
 
       - name: Optimization & Web Compile Build
         run: |
           cd engine-source
-          # Adds flags to make HTML5 compile lightweight as requested
           haxelib run lime build html5 -release -D DISCORD_DISABLE -D NO_PRELOAD_ALL
 
       - name: Package Flat ZIP & Standardize output
         run: |
           cd engine-source/export/release/html5/bin
-          
-          # Rename main engine JS file to funkin.js for easier jsDelivr/CDN embedding
           MAIN_JS=$(ls *.js | grep -E -v 'howler|pako' | head -n 1)
           if [ -n "$MAIN_JS" ] && [ "$MAIN_JS" != "funkin.js" ]; then
             mv "$MAIN_JS" funkin.js
-            # Update index.html to use the new JS filename
             if [ -f "index.html" ]; then
               sed -i "s/$MAIN_JS/funkin.js/g" index.html
             fi
           fi
           
-          # Ensure index.html exists fallback
           if [ ! -f "index.html" ]; then
             echo "<!DOCTYPE html><html><body><h1>FNF Web Build</h1><script src='funkin.js'></script></body></html>" > index.html
           fi
