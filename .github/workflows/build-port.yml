@@ -79,7 +79,7 @@ jobs:
           
           haxelib run lime setup
 
-      - name: Patch HTML5 incompatible code (Mock Sys & Threads)
+      - name: Patch HTML5 incompatible code (Mock Sys, Threads & Discord)
         run: |
           cd engine-source
           
@@ -96,12 +96,18 @@ jobs:
           echo 'class Event { public function new() {} public function wait(?time:Float) {} public function signal() {} public function cancelWait() {} }' > source/Event.hx
           echo 'class Semaphore { public function new(value:Int) {} public function acquire() {} public function release() {} }' > source/Semaphore.hx
           
-          # Patch Project.xml
+          # Patch Project.xml and Mock Discord classes
           sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
+          
           mkdir -p source/hxdiscord_rpc
           echo 'package hxdiscord_rpc; class Discord { public static function Initialize(a:String,b:Bool,c:Dynamic){} public static function Shutdown(){} public static function RunCallbacks(){} public static function UpdatePresence(a:Dynamic){} public static function ClearPresence(){} }' > source/hxdiscord_rpc/Discord.hx
           echo 'package hxdiscord_rpc; class Types { public static inline var DISCORD_REPLY_NO=0; public static inline var DISCORD_REPLY_YES=1; public static inline var DISCORD_REPLY_IGNORE=2; }' > source/hxdiscord_rpc/Types.hx
           echo 'package hxdiscord_rpc; typedef DiscordPresence = Dynamic;' > source/hxdiscord_rpc/DiscordPresence.hx
+          echo 'package hxdiscord_rpc; typedef DiscordRichPresence = Dynamic;' > source/hxdiscord_rpc/DiscordRichPresence.hx
+          
+          # Fallback for older Discord RPC structures
+          mkdir -p source/discord_rpc
+          echo 'package discord_rpc; typedef DiscordRichPresence = Dynamic;' > source/discord_rpc/DiscordRichPresence.hx
 
           # Run regex replace across all Haxe source files
           find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g' \
