@@ -15,7 +15,6 @@ jobs:
       contents: write
     steps:
       - name: Checkout Base Engine
-        # Updated to ensure compatibility with modern runners
         uses: actions/checkout@v4
         with:
           repository: 'ShadowMario/FNF-PsychEngine'
@@ -55,25 +54,24 @@ jobs:
         run: |
           cd engine-source
           haxelib setup ~/haxelib
-          # Install and setup the 'hmm' manager
           haxelib install hmm --quiet
           haxelib run hmm setup
           
-          # Check if hmm.json exists; if not, install core dependencies manually
-          if [ -f "hmm.json" ]; then
-            haxelib run hmm install --quiet
-          else
-            echo "hmm.json not found! Falling back to manual install..."
-            haxelib install lime 8.0.2 --quiet
-            haxelib install openfl 9.2.2 --quiet
-            haxelib install flixel 5.3.1 --quiet
-            haxelib install flixel-addons 3.1.1 --quiet
-            haxelib install flixel-ui 2.5.0 --quiet
-            haxelib install hscript 2.5.0 --quiet
-            haxelib git linc_luajit https://github.com/superpowers04/linc_luajit --quiet
-          fi
+          # Force install the specific version that caused the error
+          haxelib install flixel 5.6.1 --quiet
           
-          # Finalize lime/openfl setup
+          # Install other common Psych Engine dependencies
+          haxelib install lime 8.1.1 --quiet
+          haxelib install openfl 9.3.3 --quiet
+          haxelib install flixel-addons 3.2.2 --quiet
+          haxelib install flixel-ui 2.6.1 --quiet
+          haxelib install hscript 2.5.0 --quiet
+          haxelib install tjson 1.4.0 --quiet
+          haxelib git linc_luajit https://github.com/superpowers04/linc_luajit --quiet
+          
+          # Try to run hmm install to catch anything else, but don't fail if it doesn't find hmm.json
+          haxelib run hmm install --quiet || true
+          
           haxelib run lime setup
 
       - name: Patch HTML5 incompatible code (Mock Sys)
