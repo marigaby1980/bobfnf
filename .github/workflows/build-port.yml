@@ -54,7 +54,8 @@ jobs:
       - name: Setup Haxe and System Tools
         run: |
           sudo apt-get update
-          sudo apt-get install fontforge ttf2woff -y --no-install-recommends
+          # Using woff-tools instead of ttf2woff
+          sudo apt-get install fontforge woff-tools -y --no-install-recommends
       
       - name: Install Haxe
         uses: krdlab/setup-haxe@master
@@ -84,11 +85,11 @@ jobs:
           
           haxelib run lime setup
 
-      - name: Patch HTML5 incompatible code (Surgical Fix)
+      - name: Patch HTML5 incompatible code (Surgical Logic)
         run: |
           cd engine-source
           
-          # 1. Neutralize Discord.hx with a safe structure
+          # 1. Safe Neutralization of Discord.hx
           DISCORD_FILE=$(find source -name "Discord.hx")
           if [ -f "$DISCORD_FILE" ]; then
             PACKAGE_NAME=$(grep "package" "$DISCORD_FILE" | head -n 1)
@@ -102,30 +103,23 @@ jobs:
           echo 'class File { public static function getContent(path:String) return ""; public static function getBytes(path:String) return null; public static function saveContent(path:String, c:String) return; public static function saveBytes(path:String, b:Dynamic) return; public static function copy(s:String, d:String) {} }' > source/File.hx
           echo 'class Sys { public static function exit(code:Int) {} public static function sleep(t:Float) {} public static function command(c:String, ?a:Array<String>) return 0; public static function args():Array<String> return []; public static function getCwd() return ""; public static function setCwd(s:String) {} public static function print(v:Dynamic) {} public static function println(v:Dynamic) {} public static function environment() return new haxe.ds.StringMap<String>(); public static function getEnv(s:String) return ""; public static function programPath() return ""; }' > source/Sys.hx
           echo 'class Thread { public static function create(f:Void->Void) { f(); } public static function readMessage(b:Bool) return null; public static function sendMessage(m:Dynamic) {} }' > source/Thread.hx
-          echo 'class FixedThreadPool { public function new(threads:Int) {} public function run(f:Void->Void) { f(); } }' > source/FixedThreadPool.hx
 
-          # 3. Specific fix for PsychUIInputText (The syntax error source)
-          INPUT_TEXT_FILE=$(find source -name "PsychUIInputText.hx")
-          if [ -f "$INPUT_TEXT_FILE" ]; then
-             sed -i 's/import cpp\./\/\/ import cpp./g' "$INPUT_TEXT_FILE"
-             sed -i 's/cpp\.//g' "$INPUT_TEXT_FILE"
-          fi
-
-          # 4. Global Surgical Replacement (Avoids deleting braces)
-          find source -name "*.hx" -type f -exec sed -i \
-            -e 's/\bsys\.FileSystem\b/FileSystem/g' \
-            -e 's/\bsys\.io\.File\b/File/g' \
-            -e 's/\bsys\.thread\.Thread\b/Thread/g' \
-            -e 's/\bsys\.thread\.FixedThreadPool\b/FixedThreadPool/g' \
-            -e 's/\bDiscordRichPresence\b/Dynamic/g' \
-            -e 's/\bDiscordPresence\b/Dynamic/g' \
-            -e 's/\bcpp\.RawConstPointer\b/Dynamic/g' \
-            -e 's/\bcpp\.RawPointer\b/Dynamic/g' \
-            -e 's/\bimport cpp\./\/\/ import cpp./g' \
-            -e 's/\bimport llua\./\/\/ import llua./g' {} +
-
-          # 5. Project.xml Cleanup
+          # 3. Handle Project.xml dependencies
           sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
+
+          # 4. Global Surgical Replacement (Avoids mangling structure)
+          # We use a more specific pattern to avoid the 'Expected }' error
+          find source -name "*.hx" -type f -exec sed -i \
+            -e 's/sys\.FileSystem/FileSystem/g' \
+            -e 's/sys\.io\.File/File/g' \
+            -e 's/sys\.thread\.Thread/Thread/g' \
+            -e 's/DiscordRichPresence/Dynamic/g' \
+            -e 's/DiscordPresence/Dynamic/g' \
+            -e 's/cpp\.RawConstPointer/Dynamic/g' \
+            -e 's/cpp\.RawPointer/Dynamic/g' \
+            -e 's/cpp\.Lib/Dynamic/g' \
+            -e 's/import cpp\./\/\/ import cpp./g' \
+            -e 's/import llua\./\/\/ import llua./g' {} +
 
       - name: Optimization & Web Compile Build
         run: |
