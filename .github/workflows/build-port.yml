@@ -11,9 +11,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Force Node 24 now
     permissions:
       contents: write
-    steps:
       - name: Checkout Base Engine
         uses: actions/checkout@v4
         with:
