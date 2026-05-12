@@ -51,15 +51,33 @@ jobs:
         with:
           haxe-version: 4.2.5
 
-      - name: Install Haxelibs and Dependencies
+            - name: Install Haxelibs and Dependencies
         run: |
           cd engine-source
           haxelib setup ~/haxelib
+          
+          # Install and setup the 'hmm' manager
           haxelib install hmm --quiet
-          haxelib run hmm install --quiet
-          haxelib install lime
-          haxelib install openfl
-          haxelib install flixel
+          haxelib run hmm setup
+          
+          # Check if hmm.json exists; if not, install core dependencies manually
+          if [ -f "hmm.json" ]; then
+            echo "hmm.json found, running automated install..."
+            haxelib run hmm install --quiet
+          else
+            echo "hmm.json not found! Falling back to manual install of Psych Engine dependencies..."
+            haxelib install lime 8.1.1 --quiet
+            haxelib install openfl 9.3.3 --quiet
+            haxelib install flixel 5.6.1 --quiet
+            haxelib install flixel-addons 3.2.2 --quiet
+            haxelib install flixel-ui 2.6.1 --quiet
+            haxelib install hscript 2.5.0 --quiet
+            haxelib install tjson 1.4.0 --quiet
+            haxelib git linc_luajit https://github.com/superpowers04/linc_luajit --quiet
+          fi
+          
+          # Finalize lime/openfl setup
+          haxelib run lime setup
 
       - name: Patch HTML5 incompatible code (Mock Sys)
         run: |
