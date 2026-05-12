@@ -51,7 +51,7 @@ jobs:
         with:
           haxe-version: 4.2.5
 
-            - name: Install Haxelibs and Dependencies
+      - name: Install Haxelibs and Dependencies
         run: |
           cd engine-source
           haxelib setup ~/haxelib
