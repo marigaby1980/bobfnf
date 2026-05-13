@@ -46,7 +46,6 @@ jobs:
           cd engine-source
           mkdir -p mods
           mkdir -p assets
-          # Inject the uploaded mod files into the target directories
           if [ -d "../mods_upload" ] && [ "$(ls -A ../mods_upload)" ]; then
             cp -rn ../mods_upload/* mods/ || true
             cp -rn ../mods_upload/* assets/ || true
@@ -88,7 +87,6 @@ jobs:
           set -e
           cd engine-source
           
-          # Create mock system classes for HTML5 compatibility
           mkdir -p source/hxdiscord_rpc
           
           cat > source/FileSystem.hx << 'EOF'
@@ -139,12 +137,10 @@ jobs:
           class Process {
             public var stdout:Dynamic;
             public var stderr:Dynamic;
-            
             public function new(cmd:String, ?args:Dynamic) {
               stdout = { readAll: function() return { toString: function() return ""; }; };
               stderr = { readAll: function() return { toString: function() return ""; }; };
             }
-            
             public function exitCode() return 0;
             public function close() {}
           }
@@ -152,12 +148,10 @@ jobs:
           
           cat > source/Thread.hx << 'EOF'
           class Thread {
-            public static function create(f:Void->Void) {
-              f();
-              return null;
-            }
+            public static function create(f:Void->Void) { f(); return null; }
             public static function readMessage(b:Bool) return null;
             public static function sendMessage(m:Dynamic) {}
+            public static function current():Thread return null;
           }
           EOF
           
@@ -194,22 +188,21 @@ jobs:
           typedef DiscordPresence = Dynamic;
           EOF
           
-          # Remove incompatible dependencies from Project.xml
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
           
-          # Replace sys calls with mock versions
           find source -name "*.hx" -type f -exec sed -i \
             -e 's/sys\.FileSystem/FileSystem/g' \
             -e 's/sys\.io\.File/File/g' \
             -e 's/sys\.Sys/Sys/g' \
-            -e 's/sys\.Thread/Thread/g' \
+            -e 's/import sys\.thread\.Thread;/import Thread;/g' \
+            -e 's/sys\.thread\.Thread/Thread/g' \
+            -e 's/import sys\.thread\.Mutex;/import Mutex;/g' \
             -e 's/sys\.thread\.Mutex/Mutex/g' \
             -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
             {} + || true
           
-          # Fix FlxSoundTray if it exists
           if [ -f "source/flixel/ui/FlxSoundTray.hx" ]; then
             sed -i 's/public function new(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\n&/g' source/flixel/ui/FlxSoundTray.hx || true
           fi
@@ -220,7 +213,6 @@ jobs:
         run: |
           set -e
           cd engine-source
-          # Adds flags to make HTML5 compile lightweight
           echo "Building Haxe project for HTML5..."
           haxelib run lime build html5 -release -D DISCORD_DISABLE -D NO_PRELOAD_ALL -D NO_COMPILATION_TRACE
           echo "Build completed successfully"
@@ -229,49 +221,20 @@ jobs:
         run: |
           set -e
           BUILD_DIR="engine-source/export/release/html5/bin"
-          
-          if [ ! -d "$BUILD_DIR" ]; then
-            echo "Error: Build directory not found at $BUILD_DIR"
-            exit 1
-          fi
-          
+          if [ ! -d "$BUILD_DIR" ]; then exit 1; fi
           cd "$BUILD_DIR"
-          
-          # Rename main engine JS file to funkin.js for easier CDN embedding
           MAIN_JS=$(ls *.js 2>/dev/null | grep -E -v 'howler|pako' | head -n 1)
           if [ -n "$MAIN_JS" ] && [ "$MAIN_JS" != "funkin.js" ]; then
-            echo "Renaming $MAIN_JS to funkin.js"
             mv "$MAIN_JS" funkin.js
-            # Update index.html to use the new JS filename
-            if [ -f "index.html" ]; then
-              sed -i "s/$MAIN_JS/funkin.js/g" index.html
-            fi
+            if [ -f "index.html" ]; then sed -i "s/$MAIN_JS/funkin.js/g" index.html; fi
           fi
-          
-          # Ensure index.html exists with fallback
           if [ ! -f "index.html" ]; then
-            echo "Creating fallback index.html"
             cat > index.html << 'HTMLEOF'
           <!DOCTYPE html>
-          <html>
-            <head>
-              <meta charset="UTF-8">
-              <title>Friday Night Funkin - Web Build</title>
-              <style>
-                body { margin: 0; padding: 0; overflow: hidden; background: #000; }
-              </style>
-            </head>
-            <body>
-              <script src="funkin.js"></script>
-            </body>
-          </html>
+          <html><head><meta charset="UTF-8"><title>Friday Night Funkin - Web Build</title><style>body { margin: 0; padding: 0; overflow: hidden; background: #000; }</style></head><body><script src="funkin.js"></script></body></html>
           HTMLEOF
           fi
-          
-          # Create ZIP archive
-          echo "Creating ZIP archive..."
-          zip -r ../../../../../web_export.zip . || { echo "Failed to create ZIP"; exit 1; }
-          echo "ZIP archive created successfully"
+          zip -r ../../../../../web_export.zip . || exit 1
 
       - name: Upload Web Export
         uses: actions/upload-artifact@v4
@@ -284,29 +247,17 @@ jobs:
         run: |
           set -e
           BUILD_DIR="engine-source/export/release/html5/bin"
-          
-          if [ ! -d "$BUILD_DIR" ]; then
-            echo "Error: Build directory not found"
-            exit 1
-          fi
-          
+          if [ ! -d "$BUILD_DIR" ]; then exit 1; fi
           cd "$BUILD_DIR"
-          
-          # Initialize git repo
           git init
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # Add all files
           git add .
-          
-          # Check if there are changes
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo "No changes"
           else
             git commit -m "Automated Web Port Build - $(date +'%Y-%m-%d %H:%M:%S')"
             git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build
-            echo "Published to web-build branch successfully"
           fi
 
       - name: Job Summary
@@ -316,6 +267,3 @@ jobs:
           echo "- **Build Date**: $(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Artifact**: web-export.zip" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "- **Branch**: web-build" >> $GITHUB_STEP_SUMMARY
-          fi
