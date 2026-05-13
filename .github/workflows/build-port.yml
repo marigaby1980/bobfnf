@@ -123,7 +123,7 @@ jobs:
           }
           EOF
 
-          # 3. Aggressive Source Patching
+          # 3. Aggressive Source Patching for Threading and System IO
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
@@ -145,6 +145,9 @@ jobs:
             -e 's/getCPUThreadsCount()/1/g' \
             -e 's/:Mutex/:Dynamic/g' \
             -e 's/:Thread/:Dynamic/g' \
+            -e 's/new FixedThreadPool(.*)/{run: function(f) f(), exit: function() {}, shutdown: function() {}}/g' \
+            -e 's/:FixedThreadPool/:Dynamic/g' \
+            -e 's/FixedThreadPool/Dynamic/g' \
             -e 's/import sys\.thread\..*;//g' \
             -e 's/cpp\.vm\.Gc\.memInfo64.*/0;/g' \
             -e 's/cpp\.RawConstPointer\.addressOf/cast/g' \
@@ -173,7 +176,6 @@ jobs:
           set -e
           BUILD_DIR="engine-source/export/release/html5/bin"
           cd "$BUILD_DIR"
-          # Rename main JS file to a consistent name
           MAIN_JS=$(ls *.js | grep -v 'howler' | head -n 1)
           mv "$MAIN_JS" funkin.js && sed -i "s/$MAIN_JS/funkin.js/g" index.html || true
           zip -r ../../../../../web_export.zip .
