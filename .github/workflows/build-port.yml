@@ -79,7 +79,7 @@ jobs:
           }
           EOF
 
-          # 2. Create Web-Specific Mocks (FileSystem/File/Sys)
+          # 2. Create Web-Specific Mocks
           cat > source/WebFileSystem.hx << 'EOF'
           class WebFileSystem { 
             public static function absolutePath(p:String) return p; 
@@ -119,7 +119,7 @@ jobs:
           }
           EOF
 
-          # 3. Discord Mock
+          # 3. Enhanced Discord Mock (Fixes "Not enough arguments" error)
           rm -f source/backend/Discord.hx
           mkdir -p source/backend
           cat > source/backend/Discord.hx << 'EOF'
@@ -129,17 +129,16 @@ jobs:
             public static function prepare() {}
             public static function shutdown() {}
             public static function resetClientID() {}
-            public static function changePresence(details:String, state:String, ?smallImageKey:String, ?hasStartTimestamp:Bool, ?endTimestamp:Float) {}
+            public static function changePresence(details:String, ?state:String, ?smallImageKey:String, ?hasStartTimestamp:Bool, ?endTimestamp:Float) {}
             public static function addPresence() {}
           }
           EOF
 
-          # 4. Patch Engine Source (Excluding our newly created Mocks)
+          # 4. Patch Engine Source
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
           
-          # We only patch existing files, skipping the Web*.hx mocks we just made
           find source -name "*.hx" ! -name "Web*.hx" ! -name "FixedThreadPool.hx" -type f -exec sed -i \
             -e 's/import sys\.FileSystem/import WebFileSystem/g' \
             -e 's/import sys\.io\.File/import WebFile/g' \
@@ -157,6 +156,7 @@ jobs:
             -e 's/Sys\.getCPUThreadsCount/WebSys.getCPUThreadsCount/g' \
             -e 's/getCPUThreadsCount()/1/g' \
             -e 's/:Mutex/:Dynamic/g' \
+            -e 's/new Mutex()/cast {}/g' \
             -e 's/:Thread/:Dynamic/g' \
             -e 's/import sys\.thread\..*;//g' \
             -e 's/cpp\.vm\.Gc\.memInfo64.*/0;/g' \
@@ -166,9 +166,11 @@ jobs:
             -e 's/FlxG\.error/FlxG.log.error/g' \
             {} + || true
 
-          # 5. Fix Package and Option errors
+          # 5. Fix Package and Options (Correcting "String should be Bool" by ensuring proper parameter casting)
           find source -name "FileDialogHandler.hx" -exec sed -i '/package /a import haxe.io.Path;' {} + || true
-          find source -name "*SettingsSubState.hx" -exec sed -i 's/new Option(/new Option(cast /g' {} + || true
+          
+          # Fix for Options classes: ensuring the second argument is treated correctly for HTML5
+          find source/options -name "*SettingsSubState.hx" -exec sed -i 's/new Option(\([^,]*\), \([^,]*\),/new Option(\1, cast \2,/g' {} + || true
 
           echo "HTML5 patching completed"
 
