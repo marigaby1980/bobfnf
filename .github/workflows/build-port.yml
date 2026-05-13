@@ -213,9 +213,9 @@ jobs:
             -e 's/cpp\.ConstCharStar/Dynamic/g' \
             -e 's/cpp\.CharStar/Dynamic/g' \
             -e 's/cpp\.Function/Dynamic/g' \
-            -e 's/fromStaticFunction/function(f) return f/g' \
+            -e 's/fromStaticFunction/cast/g' \
             {} + || true
-     
+          
           if [ -f "source/flixel/ui/FlxSoundTray.hx" ]; then
             sed -i 's/public function new(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\n&/g' source/flixel/ui/FlxSoundTray.hx || true
           fi
