@@ -71,28 +71,64 @@ jobs:
           set -e
           cd engine-source
           
-          # 1. Convert TTF to WOFF to stop build warnings
+          # 1. Convert TTF to WOFF for web compatibility
           find assets/fonts -name "*.ttf" -exec sh -c 'fontforge -lang=ff -c "Open(\$1); Generate(\${1%.ttf}.woff); Close();" "$1"' _ {} \; || true
 
-          # 2. Comprehensive Mocks (Placed in 'source' to override browser types)
-          cat > source/FileSystem.hx << 'EOF'
-          class FileSystem { public static function absolutePath(p:String) return p; public static function exists(p:String) return false; public static function readDirectory(p:String):Array<String> return []; public static function createDirectory(p:String) {} public static function deleteFile(p:String) {} public static function deleteDirectory(p:String) {} public static function rename(p:String, n:String) {} public static function stat(p:String) return null; public static function fullPath(r:String) return r; }
+          # 2. Create Mocks with unique names to avoid browser/std collisions
+          cat > source/CoolFileSystem.hx << 'EOF'
+          class CoolFileSystem { 
+            public static function absolutePath(p:String) return p; 
+            public static function exists(p:String) return false; 
+            public static function readDirectory(p:String):Array<String> return []; 
+            public static function createDirectory(p:String) {} 
+            public static function deleteFile(p:String) {} 
+            public static function deleteDirectory(p:String) {} 
+            public static function rename(p:String, n:String) {} 
+            public static function stat(p:String) return null; 
+            public static function fullPath(r:String) return r; 
+          }
           EOF
           
-          cat > source/File.hx << 'EOF'
-          class File { public static function getContent(p:String):String return ""; public static function getBytes(p:String):Dynamic return null; public static function saveContent(p:String, c:String) {} public static function saveBytes(p:String, b:Dynamic) {} public static function append(p:String, c:String) {} }
+          cat > source/CoolFile.hx << 'EOF'
+          class CoolFile { 
+            public static function getContent(p:String):String return ""; 
+            public static function getBytes(p:String):Dynamic return null; 
+            public static function saveContent(p:String, c:String) {} 
+            public static function saveBytes(p:String, b:Dynamic) {} 
+            public static function append(p:String, c:String) {} 
+          }
           EOF
           
-          cat > source/Sys.hx << 'EOF'
-          class Sys { public static function exit(c:Int) {} public static function sleep(t:Float) {} public static function command(c:String, ?a:Array<String>) return 0; public static function environment() return new Map<String, String>(); public static function getEnv(n:String) return null; public static function putEnv(n:String, v:String) {} public static var print_redirect:Dynamic = null; public static function getCPUThreadsCount():Int return 1; }
+          cat > source/CoolSys.hx << 'EOF'
+          class CoolSys { 
+            public static function exit(c:Int) {} 
+            public static function sleep(t:Float) {} 
+            public static function command(c:String, ?a:Array<String>) return 0; 
+            public static function environment() return new Map<String, String>(); 
+            public static function getEnv(n:String) return null; 
+            public static function putEnv(n:String, v:String) {} 
+            public static var print_redirect:Dynamic = null; 
+            public static function getCPUThreadsCount():Int return 1; 
+          }
           EOF
 
           cat > source/FixedThreadPool.hx << 'EOF'
-          class FixedThreadPool { public function new(threads:Int) {} public function run(f:Void->Void) { f(); } public function exit() {} public function shutdown() {} }
+          class FixedThreadPool { 
+            public function new(threads:Int) {} 
+            public function run(f:Void->Void) { f(); } 
+            public function exit() {} 
+            public function shutdown() {} 
+          }
+          EOF
+
+          mkdir -p source/hxdiscord_rpc
+          cat > source/hxdiscord_rpc/Types.hx << 'EOF'
+          package hxdiscord_rpc;
+          class Types { }
           EOF
           
-          # 3. Clean and Replace Discord Logic
-          rm -rf source/backend/Discord.hx
+          # 3. Comprehensive Redefinition (Wipe out Discord/Threaded logic)
+          rm -f source/backend/Discord.hx
           mkdir -p source/backend
           cat > source/backend/Discord.hx << 'EOF'
           package backend;
@@ -100,28 +136,30 @@ jobs:
             public static function check() {}
             public static function prepare() {}
             public static function shutdown() {}
-            public static function changePresence(details:String, state:String, ?smallImageKey:String, ?hasStartTimestamp:Bool, ?endTimestamp:Float) {}
-            #if DISCORD_ALLOWED public static function addPresence() {} #end
+            public static function changePresence(d:String, s:String, ?i:String, ?b:Bool, ?e:Float) {}
           }
           EOF
 
-          # 4. Modify imports in the code to point to our Mocks instead of standard sys
+          # 4. Patch Engine Source
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
           
           find source -name "*.hx" -type f -exec sed -i \
-            -e 's/import sys\.FileSystem/import FileSystem/g' \
-            -e 's/import sys\.io\.File/import File/g' \
-            -e 's/import sys\.Sys/import Sys/g' \
-            -e 's/sys\.FileSystem/FileSystem/g' \
-            -e 's/sys\.io\.File/File/g' \
-            -e 's/sys\.Sys/Sys/g' \
-            -e 's/getCPUThreadsCount()/Sys.getCPUThreadsCount()/g' \
+            -e 's/sys\.FileSystem/CoolFileSystem/g' \
+            -e 's/FileSystem/CoolFileSystem/g' \
+            -e 's/sys\.io\.File/CoolFile/g' \
+            -e 's/File\.getContent/CoolFile.getContent/g' \
+            -e 's/sys\.Sys/CoolSys/g' \
+            -e 's/Sys\.getCPUThreadsCount/CoolSys.getCPUThreadsCount/g' \
+            -e 's/getCPUThreadsCount()/1/g' \
+            -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
+            -e 's/sys\.thread\.Thread/Dynamic/g' \
+            -e 's/sys\.thread\.Mutex/Dynamic/g' \
+            -e 's/import sys\.thread\..*;//g' \
             -e 's/cpp\.RawConstPointer\.addressOf/cast/g' \
             -e 's/cpp\.RawPointer\.addressOf/cast/g' \
             -e 's/cpp\.RawPointer/Dynamic/g' \
-            -e 's/cpp\.ConstCharStar/Dynamic/g' \
             {} + || true
           
           echo "HTML5 patching completed"
