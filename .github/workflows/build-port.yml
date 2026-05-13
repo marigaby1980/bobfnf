@@ -1,10 +1,10 @@
-[span_2](start_span)name: Build FNF Web Port[span_2](end_span)
+name: Build FNF Web Port
 
 on:
   workflow_dispatch:
     inputs:
       mod_url:
-        [span_3](start_span)description: 'Direct URL to your mod .zip file'[span_3](end_span)
+        description: 'Direct URL to your mod .zip file (Google Drive, Dropbox, MediaFire, Discord, etc.)'
         required: true
         type: string
 
@@ -14,36 +14,47 @@ jobs:
     permissions:
       contents: write
     steps:
-      - [span_4](start_span)name: Checkout Base Engine[span_4](end_span)
+      - name: Checkout Base Engine
         uses: actions/checkout@v4
         with:
-          [span_5](start_span)repository: 'ShadowMario/FNF-PsychEngine'[span_5](end_span)
+          repository: 'ShadowMario/FNF-PsychEngine'
           path: 'engine-source'
 
-      - [span_6](start_span)name: Download Mod Payload[span_6](end_span)
+      - name: Download Mod Payload
         run: |
-          [span_7](start_span)set -e[span_7](end_span)
+          set -e
+          echo "Downloading mod from URL provided..."
           pip install gdown --quiet
+          
           URL="${{ github.event.inputs.mod_url }}"
-          [span_8](start_span)if [[ "$URL" == *"drive.google.com"* ]]; then[span_8](end_span)
-            gdown "$URL" -O mod-payload.zip || { echo "Failed to download from Drive"; exit 1; [span_9](start_span)}
+          
+          if [[ "$URL" == *"drive.google.com"* ]]; then
+            gdown "$URL" -O mod-payload.zip || { echo "Failed to download from Google Drive"; exit 1; }
           else
-            wget -q -O mod-payload.zip "$URL" || { echo "Failed to download from URL"; exit 1; }[span_9](end_span)
+            wget -q -O mod-payload.zip "$URL" || { echo "Failed to download from URL"; exit 1; }
           fi
+          
+          echo "Extracting Mod Payload..."
           mkdir -p mods_upload
-          unzip -q mod-payload.zip -d mods_upload/ || { echo "Failed to extract ZIP"; exit 1; [span_10](start_span)}
+          unzip -q mod-payload.zip -d mods_upload/ || { echo "Failed to extract ZIP"; exit 1; }
           rm mod-payload.zip
+          echo "Mod payload extracted successfully"
 
-      - name: Inject Mods into Engine[span_10](end_span)
+      - name: Inject Mods into Engine
         run: |
-          [span_11](start_span)set -e[span_11](end_span)
+          set -e
           cd engine-source
-          mkdir -p mods assets
-          [span_12](start_span)if [ -d "../mods_upload" ] && [ "$(ls -A ../mods_upload)" ]; then[span_12](end_span)
-            [span_13](start_span)cp -rn ../mods_upload/* mods/ || true[span_13](end_span)
-            [span_14](start_span)cp -rn ../mods_upload/* assets/ || true[span_14](end_span)
+          mkdir -p mods
+          mkdir -p assets
+          # Inject the uploaded mod files into the target directories
+          if [ -d "../mods_upload" ] && [ "$(ls -A ../mods_upload)" ]; then
+            cp -rn ../mods_upload/* mods/ || true
+            cp -rn ../mods_upload/* assets/ || true
+            echo "Mods injected successfully"
+          else
+            echo "Warning: No mods found in mods_upload directory"
           fi
-
+  
       - name: Install Linux Font Tools
         run: sudo apt-get install fontforge -y
 
@@ -52,13 +63,13 @@ jobs:
         with:
           haxe-version: 4.3.6
 
-      - [span_15](start_span)name: Install Haxelibs and Dependencies[span_15](end_span)
+      - name: Install Haxelibs and Dependencies
         run: |
-          [span_16](start_span)set -e[span_16](end_span)
+          set -e
           cd engine-source
           haxelib setup ~/haxelib
           haxelib install hmm --quiet
-          [span_17](start_span)if [ -f "../hmm.json" ]; then[span_17](end_span)
+          if [ -f "../hmm.json" ]; then
             cp ../hmm.json ./
             haxelib run hmm install --quiet
           fi
@@ -66,64 +77,79 @@ jobs:
           haxelib install openfl --quiet
           haxelib install flixel 5.6.1 --quiet
           haxelib install flixel-addons 3.2.2 --quiet
+          haxelib install flixel-ui --quiet
+          haxelib install hscript --quiet
           haxelib install tjson 1.4.0 --quiet
           haxelib install flxanimate --quiet
-          haxelib install hscript --quiet
           echo "All Haxelibs installed successfully"
 
-      - [span_18](start_span)name: Patch HTML5 incompatible code (Mock Sys)[span_18](end_span)
+      - name: Patch HTML5 incompatible code (Mock Sys)
         run: |
-          [span_19](start_span)set -e[span_19](end_span)
+          set -e
           cd engine-source
+          
+          # Create mock system classes for HTML5 compatibility
           mkdir -p source/hxdiscord_rpc
           
-          [span_20](start_span)cat > source/FileSystem.hx << 'EOF'[span_20](end_span)
+          cat > source/FileSystem.hx << 'EOF'
           class FileSystem {
-            [span_21](start_span)public static function absolutePath(path:String) return path;[span_21](end_span)
+            public static function absolutePath(path:String) return path;
             public static function exists(path:String) return false;
             public static function readDirectory(path:String) return [];
-            [span_22](start_span)public static function createDirectory(path:String) {}[span_22](end_span)
+            public static function createDirectory(path:String) {}
             public static function deleteFile(path:String) {}
             public static function deleteDirectory(path:String) {}
             public static function rename(path:String, newpath:String) {}
             public static function stat(path:String) return null;
-            [span_23](start_span)public static function fullPath(relPath:String) return relPath;[span_23](end_span)
+            public static function fullPath(relPath:String) return relPath;
           }
           EOF
           
           cat > source/File.hx << 'EOF'
           class File {
             public static function getContent(path:String) return "";
-            [span_24](start_span)public static function getBytes(path:String) return null;[span_24](end_span)
+            public static function getBytes(path:String) return null;
             public static function saveContent(path:String, content:String) {}
             public static function saveBytes(path:String, bytes:Dynamic) {}
+            public static function append(path:String, content:String) {}
           }
           EOF
           
-          [span_25](start_span)cat > source/Sys.hx << 'EOF'[span_25](end_span)
+          cat > source/Sys.hx << 'EOF'
           class Sys {
             public static function exit(code:Int) {}
             public static function sleep(t:Float) {}
             public static function command(cmd:String, ?args:Array<String>) return 0;
-            [span_26](start_span)public static function environment() return new Map<String, String>();[span_26](end_span)
+            public static function environment() return new Map<String, String>();
             public static function getEnv(name:String) return null;
-            [span_27](start_span)public static function putEnv(name:String, value:String) {}[span_27](end_span)
+            public static function putEnv(name:String, value:String) {}
+            public static var print_redirect:Dynamic = null;
           }
           EOF
-
-          cat > source/FixedThreadPool.hx << 'EOF'
-          class FixedThreadPool {
-            public function new(threads:Int) {}
-            public function run(f:Void->Void) { f(); }
-            public function exit() {}
+          
+          cat > source/Process.hx << 'EOF'
+          class Process {
+            public var stdout:Dynamic;
+            public var stderr:Dynamic;
+            
+            public function new(cmd:String, ?args:Dynamic) {
+              stdout = { readAll: function() return { toString: function() return ""; }; };
+              stderr = { readAll: function() return { toString: function() return ""; }; };
+            }
+            
+            public function exitCode() return 0;
+            public function close() {}
           }
           EOF
           
           cat > source/Thread.hx << 'EOF'
           class Thread {
-            public static function create(f:Void->Void) { f(); return null; [span_28](start_span)}
+            public static function create(f:Void->Void) {
+              f();
+              return null;
+            }
             public static function readMessage(b:Bool) return null;
-            public static function sendMessage(m:Dynamic) {}[span_28](end_span)
+            public static function sendMessage(m:Dynamic) {}
           }
           EOF
           
@@ -131,11 +157,11 @@ jobs:
           class Mutex {
             public function new() {}
             public function acquire() {}
-            [span_29](start_span)public function release() {}[span_29](end_span)
+            public function release() {}
           }
           EOF
           
-          [span_30](start_span)cat > source/hxdiscord_rpc/Discord.hx << 'EOF'[span_30](end_span)
+          cat > source/hxdiscord_rpc/Discord.hx << 'EOF'
           package hxdiscord_rpc;
           class Discord {
             public static function Initialize(a:String, b:Bool, c:Dynamic) {}
@@ -145,78 +171,142 @@ jobs:
             public static function ClearPresence() {}
           }
           EOF
-
-          [span_31](start_span)cat > source/hxdiscord_rpc/Types.hx << 'EOF'[span_31](end_span)
+          
+          cat > source/hxdiscord_rpc/Types.hx << 'EOF'
           package hxdiscord_rpc;
           class Types {
-            [span_32](start_span)public static inline var DISCORD_REPLY_NO = 0;[span_32](end_span)
-            [span_33](start_span)public static inline var DISCORD_REPLY_YES = 1;[span_33](end_span)
-            [span_34](start_span)public static inline var DISCORD_REPLY_IGNORE = 2;[span_34](end_span)
+            public static inline var DISCORD_REPLY_NO = 0;
+            public static inline var DISCORD_REPLY_YES = 1;
+            public static inline var DISCORD_REPLY_IGNORE = 2;
           }
           EOF
-
-          [span_35](start_span)cat > source/hxdiscord_rpc/DiscordPresence.hx << 'EOF'[span_35](end_span)
+          
+          cat > source/hxdiscord_rpc/DiscordPresence.hx << 'EOF'
           package hxdiscord_rpc;
           typedef DiscordPresence = Dynamic;
           EOF
           
-          [span_36](start_span)if [ -f "Project.xml" ]; then[span_36](end_span)
-            [span_37](start_span)sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true[span_37](end_span)
+          # Remove incompatible dependencies from Project.xml
+          if [ -f "Project.xml" ]; then
+            sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
           
+          # Replace sys calls with mock versions
           find source -name "*.hx" -type f -exec sed -i \
             -e 's/sys\.FileSystem/FileSystem/g' \
             -e 's/sys\.io\.File/File/g' \
             -e 's/sys\.Sys/Sys/g' \
             -e 's/sys\.Thread/Thread/g' \
             -e 's/sys\.thread\.Mutex/Mutex/g' \
-            -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
-            [span_38](start_span){} + || true[span_38](end_span)
+            {} + || true
           
-          [span_39](start_span)echo "HTML5 patching completed"[span_39](end_span)
+          # Fix FlxSoundTray if it exists
+          if [ -f "source/flixel/ui/FlxSoundTray.hx" ]; then
+            sed -i 's/public function new(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\n&/g' source/flixel/ui/FlxSoundTray.hx || true
+          fi
+          
+          echo "HTML5 patching completed"
 
-      - [span_40](start_span)name: Optimization & Web Compile Build[span_40](end_span)
+      - name: Optimization & Web Compile Build
         run: |
           set -e
           cd engine-source
-          [span_41](start_span)haxelib run lime build html5 -release -D DISCORD_DISABLE -D NO_PRELOAD_ALL -D NO_COMPILATION_TRACE[span_41](end_span)
+          # Adds flags to make HTML5 compile lightweight
+          echo "Building Haxe project for HTML5..."
+          haxelib run lime build html5 -release -D DISCORD_DISABLE -D NO_PRELOAD_ALL -D NO_COMPILATION_TRACE
+          echo "Build completed successfully"
 
-      - [span_42](start_span)name: Package Flat ZIP & Standardize output[span_42](end_span)
+      - name: Package Flat ZIP & Standardize output
         run: |
-          [span_43](start_span)set -e[span_43](end_span)
+          set -e
           BUILD_DIR="engine-source/export/release/html5/bin"
-          [span_44](start_span)cd "$BUILD_DIR"[span_44](end_span)
-          [span_45](start_span)MAIN_JS=$(ls *.js 2>/dev/null | grep -E -v 'howler|pako' | head -n 1)[span_45](end_span)
-          [span_46](start_span)if [ -n "$MAIN_JS" ] && [ "$MAIN_JS" != "funkin.js" ]; then[span_46](end_span)
-            mv "$MAIN_JS" funkin.js
-            [span_47](start_span)sed -i "s/$MAIN_JS/funkin.js/g" index.html[span_47](end_span)
+          
+          if [ ! -d "$BUILD_DIR" ]; then
+            echo "Error: Build directory not found at $BUILD_DIR"
+            exit 1
           fi
-          zip -r ../../../../../web_export.zip . || { echo "Failed ZIP"; exit 1; [span_48](start_span)}
+          
+          cd "$BUILD_DIR"
+          
+          # Rename main engine JS file to funkin.js for easier CDN embedding
+          MAIN_JS=$(ls *.js 2>/dev/null | grep -E -v 'howler|pako' | head -n 1)
+          if [ -n "$MAIN_JS" ] && [ "$MAIN_JS" != "funkin.js" ]; then
+            echo "Renaming $MAIN_JS to funkin.js"
+            mv "$MAIN_JS" funkin.js
+            # Update index.html to use the new JS filename
+            if [ -f "index.html" ]; then
+              sed -i "s/$MAIN_JS/funkin.js/g" index.html
+            fi
+          fi
+          
+          # Ensure index.html exists with fallback
+          if [ ! -f "index.html" ]; then
+            echo "Creating fallback index.html"
+            cat > index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="UTF-8">
+              <title>Friday Night Funkin - Web Build</title>
+              <style>
+                body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+              </style>
+            </head>
+            <body>
+              <script src="funkin.js"></script>
+            </body>
+          </html>
+          HTMLEOF
+          fi
+          
+          # Create ZIP archive
+          echo "Creating ZIP archive..."
+          zip -r ../../../../../web_export.zip . || { echo "Failed to create ZIP"; exit 1; }
+          echo "ZIP archive created successfully"
 
-      - name: Upload Web Export[span_48](end_span)
+      - name: Upload Web Export
         uses: actions/upload-artifact@v4
         with:
           name: web-export
           path: web_export.zip
+          if-no-files-found: error
 
-      - [span_49](start_span)name: Auto-Publish to GitHub Branch[span_49](end_span)
+      - name: Auto-Publish to GitHub Branch
         run: |
           set -e
           BUILD_DIR="engine-source/export/release/html5/bin"
+          
+          if [ ! -d "$BUILD_DIR" ]; then
+            echo "Error: Build directory not found"
+            exit 1
+          fi
+          
           cd "$BUILD_DIR"
-          [span_50](start_span)git init[span_50](end_span)
-          [span_51](start_span)git config user.name "github-actions[bot]"[span_51](end_span)
+          
+          # Initialize git repo
+          git init
+          git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Add all files
           git add .
-          [span_52](start_span)if git diff --cached --quiet; then[span_52](end_span)
-            echo "No changes"
+          
+          # Check if there are changes
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
           else
-            [span_53](start_span)git commit -m "Automated Web Port Build - $(date +'%Y-%m-%d %H:%M:%S')"[span_53](end_span)
+            git commit -m "Automated Web Port Build - $(date +'%Y-%m-%d %H:%M:%S')"
             git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build
+            echo "Published to web-build branch successfully"
           fi
 
-      - [span_54](start_span)name: Job Summary[span_54](end_span)
+      - name: Job Summary
         if: always()
         run: |
-          [span_55](start_span)echo "## Build Summary" >> $GITHUB_STEP_SUMMARY[span_55](end_span)
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Date**: $(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact**: web-export.zip" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "- **Branch**: web-build" >> $GITHUB_STEP_SUMMARY
+          fi
