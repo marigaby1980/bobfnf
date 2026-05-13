@@ -71,10 +71,10 @@ jobs:
           set -e
           cd engine-source
           
-          # 1. Convert TTF to WOFF to stop build warnings and ensure web compatibility
+          # 1. Convert TTF to WOFF to stop build warnings
           find assets/fonts -name "*.ttf" -exec sh -c 'fontforge -lang=ff -c "Open(\$1); Generate(\${1%.ttf}.woff); Close();" "$1"' _ {} \; || true
 
-          # 2. Mock Sys, Discord, and Threads
+          # 2. Comprehensive Mocks
           mkdir -p source/hxdiscord_rpc
           
           cat > source/FileSystem.hx << 'EOF'
@@ -102,10 +102,14 @@ jobs:
           EOF
           
           cat > source/hxdiscord_rpc/Discord.hx << 'EOF'
-          package hxdiscord_rpc; class Discord { public static function Initialize(a:String, b:Bool, c:Dynamic) {} public static function Shutdown() {} public static function RunCallbacks() {} public static function UpdatePresence(p:Dynamic) {} public static function ClearPresence() {} }
+          package hxdiscord_rpc; class Discord { public static function Initialize(a:String, b:Dynamic, c:Int, d:String) {} public static function Shutdown() {} public static function RunCallbacks() {} public static function UpdatePresence(p:Dynamic) {} public static function ClearPresence() {} }
+          EOF
+
+          cat > source/hxdiscord_rpc/Types.hx << 'EOF'
+          package hxdiscord_rpc; class Types { }
           EOF
           
-          # 3. Apply broad code patches
+          # 3. Apply broad code patches and fix specific Discord errors
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
@@ -121,12 +125,15 @@ jobs:
             -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
             -e 's/DiscordRichPresence/Dynamic/g' \
             -e 's/DiscordEventHandlers/Dynamic/g' \
+            -e 's/Dynamic\.create()/null/g' \
             -e 's/cpp\.Function\.fromStaticFunction/cast/g' \
+            -e 's/cpp\.RawPointer\.addressOf/cast/g' \
             -e 's/cpp\.RawConstPointer<DiscordUser>/Dynamic/g' \
             -e 's/cpp\.ConstCharStar/Dynamic/g' \
+            -e 's/cpp\.RawPointer/Dynamic/g' \
             {} + || true
           
-          echo "HTML5 patching & Font conversion completed"
+          echo "HTML5 patching completed"
 
       - name: Optimization & Web Compile Build
         run: |
