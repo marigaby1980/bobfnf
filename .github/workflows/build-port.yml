@@ -74,22 +74,38 @@ jobs:
           # 1. Convert TTF to WOFF to stop build warnings and ensure web compatibility
           find assets/fonts -name "*.ttf" -exec sh -c 'fontforge -lang=ff -c "Open(\$1); Generate(\${1%.ttf}.woff); Close();" "$1"' _ {} \; || true
 
-          # 2. Mock Sys and Discord
+          # 2. Mock Sys, Discord, and Threads
           mkdir -p source/hxdiscord_rpc
+          
           cat > source/FileSystem.hx << 'EOF'
           class FileSystem { public static function absolutePath(p:String) return p; public static function exists(p:String) return false; public static function readDirectory(p:String) return []; public static function createDirectory(p:String) {} public static function deleteFile(p:String) {} public static function deleteDirectory(p:String) {} public static function rename(p:String, n:String) {} public static function stat(p:String) return null; public static function fullPath(r:String) return r; }
           EOF
+          
           cat > source/File.hx << 'EOF'
           class File { public static function getContent(p:String) return ""; public static function getBytes(p:String) return null; public static function saveContent(p:String, c:String) {} public static function saveBytes(p:String, b:Dynamic) {} public static function append(p:String, c:String) {} }
           EOF
+          
           cat > source/Sys.hx << 'EOF'
           class Sys { public static function exit(c:Int) {} public static function sleep(t:Float) {} public static function command(c:String, ?a:Array<String>) return 0; public static function environment() return new Map<String, String>(); public static function getEnv(n:String) return null; public static function putEnv(n:String, v:String) {} public static var print_redirect:Dynamic = null; }
           EOF
+
+          cat > source/FixedThreadPool.hx << 'EOF'
+          class FixedThreadPool { public function new(threads:Int) {} public function run(f:Void->Void) { f(); } public function exit() {} }
+          EOF
+          
+          cat > source/Thread.hx << 'EOF'
+          class Thread { public static function create(f:Void->Void) { f(); return null; } public static function readMessage(b:Bool) return null; public static function sendMessage(m:Dynamic) {} public static function current():Thread return null; }
+          EOF
+          
+          cat > source/Mutex.hx << 'EOF'
+          class Mutex { public function new() {} public function acquire() {} public function release() {} }
+          EOF
+          
           cat > source/hxdiscord_rpc/Discord.hx << 'EOF'
           package hxdiscord_rpc; class Discord { public static function Initialize(a:String, b:Bool, c:Dynamic) {} public static function Shutdown() {} public static function RunCallbacks() {} public static function UpdatePresence(p:Dynamic) {} public static function ClearPresence() {} }
           EOF
           
-          # 3. Apply broad code patches and FIX SYNTAX ERROR
+          # 3. Apply broad code patches
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
@@ -98,6 +114,11 @@ jobs:
             -e 's/sys\.FileSystem/FileSystem/g' \
             -e 's/sys\.io\.File/File/g' \
             -e 's/sys\.Sys/Sys/g' \
+            -e 's/import sys\.thread\.Thread;/import Thread;/g' \
+            -e 's/sys\.thread\.Thread/Thread/g' \
+            -e 's/import sys\.thread\.Mutex;/import Mutex;/g' \
+            -e 's/sys\.thread\.Mutex/Mutex/g' \
+            -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
             -e 's/DiscordRichPresence/Dynamic/g' \
             -e 's/DiscordEventHandlers/Dynamic/g' \
             -e 's/cpp\.Function\.fromStaticFunction/cast/g' \
