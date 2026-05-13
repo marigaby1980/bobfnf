@@ -54,11 +54,14 @@ jobs:
           else
             echo "Warning: No mods found in mods_upload directory"
           fi
+  
+      - name: Install Linux Font Tools
+        run: sudo apt-get install fontforge -y
 
       - name: Setup Haxe
         uses: krdlab/setup-haxe@master
         with:
-          haxe-version: 4.2.5
+          haxe-version: 4.3.6
 
       - name: Install Haxelibs and Dependencies
         run: |
