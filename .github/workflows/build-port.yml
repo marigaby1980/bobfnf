@@ -195,6 +195,7 @@ jobs:
           
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
+          fi
           
           find source -name "*.hx" -type f -exec sed -i \
             -e 's/sys\.FileSystem/FileSystem/g' \
@@ -211,7 +212,7 @@ jobs:
             -e 's/cpp\.ConstCharStar/Dynamic/g' \
             -e 's/cpp\.CharStar/Dynamic/g' \
             {} + || true
-        
+          
           if [ -f "source/flixel/ui/FlxSoundTray.hx" ]; then
             sed -i 's/public function new(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\n&/g' source/flixel/ui/FlxSoundTray.hx || true
           fi
