@@ -68,7 +68,7 @@ jobs:
           set -e
           cd engine-source
           
-          # 1. Create Web-Specific Mocks
+          # 1. Create Web-Specific Mocks (FileSystem/File/Sys)
           cat > source/WebFileSystem.hx << 'EOF'
           class WebFileSystem { 
             public static function absolutePath(p:String) return p; 
@@ -108,16 +108,7 @@ jobs:
           }
           EOF
 
-          cat > source/FixedThreadPool.hx << 'EOF'
-          class FixedThreadPool { 
-            public function new(threads:Int) {} 
-            public function run(f:Void->Void) { f(); } 
-            public function exit() {} 
-            public function shutdown() {} 
-          }
-          EOF
-
-          # 2. Discord Mock
+          # 2. Discord Mock with full compatibility
           rm -f source/backend/Discord.hx
           mkdir -p source/backend
           cat > source/backend/Discord.hx << 'EOF'
@@ -132,7 +123,7 @@ jobs:
           }
           EOF
 
-          # 3. Apply broad patches to Engine Source
+          # 3. Aggressive Source Patching
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
@@ -152,7 +143,8 @@ jobs:
             -e 's/Sys\.getCwd/WebSys.getCwd/g' \
             -e 's/Sys\.getCPUThreadsCount/WebSys.getCPUThreadsCount/g' \
             -e 's/getCPUThreadsCount()/1/g' \
-            -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
+            -e 's/:Mutex/:Dynamic/g' \
+            -e 's/:Thread/:Dynamic/g' \
             -e 's/import sys\.thread\..*;//g' \
             -e 's/cpp\.vm\.Gc\.memInfo64.*/0;/g' \
             -e 's/cpp\.RawConstPointer\.addressOf/cast/g' \
@@ -162,10 +154,7 @@ jobs:
             {} + || true
 
           # 4. Fix specific Package and Option errors
-          # Fix: Insert import AFTER the package line to avoid "Unexpected keyword package"
           find source -name "FileDialogHandler.hx" -exec sed -i '/package /a import haxe.io.Path;' {} + || true
-          
-          # Fix: Options casting to solve "String should be Bool"
           find source -name "*SettingsSubState.hx" -exec sed -i 's/new Option(/new Option(cast /g' {} + || true
 
           echo "HTML5 patching completed"
@@ -184,6 +173,7 @@ jobs:
           set -e
           BUILD_DIR="engine-source/export/release/html5/bin"
           cd "$BUILD_DIR"
+          # Rename main JS file to a consistent name
           MAIN_JS=$(ls *.js | grep -v 'howler' | head -n 1)
           mv "$MAIN_JS" funkin.js && sed -i "s/$MAIN_JS/funkin.js/g" index.html || true
           zip -r ../../../../../web_export.zip .
