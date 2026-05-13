@@ -68,7 +68,7 @@ jobs:
           set -e
           cd engine-source
           
-          # 1. Create Web-Specific Mocks (Using 'Web' prefix to avoid ANY browser collisions)
+          # 1. Create Web-Specific Mocks
           cat > source/WebFileSystem.hx << 'EOF'
           class WebFileSystem { 
             public static function absolutePath(p:String) return p; 
@@ -117,7 +117,7 @@ jobs:
           }
           EOF
 
-          # 2. Rebuild Discord Mock with ALL missing fields
+          # 2. Discord Mock
           rm -f source/backend/Discord.hx
           mkdir -p source/backend
           cat > source/backend/Discord.hx << 'EOF'
@@ -132,7 +132,7 @@ jobs:
           }
           EOF
 
-          # 3. Comprehensive Source Patching
+          # 3. Apply broad patches to Engine Source
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
@@ -146,6 +146,7 @@ jobs:
             -e 's/sys\.io\.File/WebFile/g' \
             -e 's/File\.getContent/WebFile.getContent/g' \
             -e 's/File\.saveContent/WebFile.saveContent/g' \
+            -e 's/File\.getBytes/WebFile.getBytes/g' \
             -e 's/sys\.Sys/WebSys/g' \
             -e 's/Sys\.sleep/WebSys.sleep/g' \
             -e 's/Sys\.getCwd/WebSys.getCwd/g' \
@@ -160,9 +161,12 @@ jobs:
             -e 's/FlxG\.error/FlxG.log.error/g' \
             {} + || true
 
-          # 4. Fix "String should be Bool" and Path errors
-          find source -name "*SettingsSubState.hx" -exec sed -i 's/new Option(/new Option((cast /g' {} + || true
-          find source -name "FileDialogHandler.hx" -exec sed -i '1i import haxe.io.Path;' {} + || true
+          # 4. Fix specific Package and Option errors
+          # Fix: Insert import AFTER the package line to avoid "Unexpected keyword package"
+          find source -name "FileDialogHandler.hx" -exec sed -i '/package /a import haxe.io.Path;' {} + || true
+          
+          # Fix: Options casting to solve "String should be Bool"
+          find source -name "*SettingsSubState.hx" -exec sed -i 's/new Option(/new Option(cast /g' {} + || true
 
           echo "HTML5 patching completed"
 
