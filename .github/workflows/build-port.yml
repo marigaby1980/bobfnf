@@ -74,7 +74,7 @@ jobs:
           # 1. Convert TTF to WOFF for web compatibility
           find assets/fonts -name "*.ttf" -exec sh -c 'fontforge -lang=ff -c "Open(\$1); Generate(\${1%.ttf}.woff); Close();" "$1"' _ {} \; || true
 
-          # 2. Create Mocks with unique names to avoid browser/std collisions
+          # 2. Create Mocks with unique names and actual class files
           cat > source/CoolFileSystem.hx << 'EOF'
           class CoolFileSystem { 
             public static function absolutePath(p:String) return p; 
@@ -121,13 +121,28 @@ jobs:
           }
           EOF
 
+          cat > source/Mutex.hx << 'EOF'
+          class Mutex {
+            public function new() {}
+            public function acquire() {}
+            public function release() {}
+          }
+          EOF
+
+          cat > source/Thread.hx << 'EOF'
+          class Thread {
+            public static function create(f:Void->Void) { f(); return null; }
+            public static function current():Dynamic return null;
+          }
+          EOF
+
           mkdir -p source/hxdiscord_rpc
           cat > source/hxdiscord_rpc/Types.hx << 'EOF'
           package hxdiscord_rpc;
           class Types { }
           EOF
           
-          # 3. Comprehensive Redefinition (Wipe out Discord/Threaded logic)
+          # 3. Redefine Discord Logic
           rm -f source/backend/Discord.hx
           mkdir -p source/backend
           cat > source/backend/Discord.hx << 'EOF'
@@ -140,12 +155,18 @@ jobs:
           }
           EOF
 
-          # 4. Patch Engine Source
+          # 4. Patch Engine Source (Cleanly handle imports)
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
           
           find source -name "*.hx" -type f -exec sed -i \
+            -e 's/import sys\.FileSystem/import CoolFileSystem/g' \
+            -e 's/import sys\.io\.File/import CoolFile/g' \
+            -e 's/import sys\.Sys/import CoolSys/g' \
+            -e 's/import sys\.thread\.Thread/import Thread/g' \
+            -e 's/import sys\.thread\.Mutex/import Mutex/g' \
+            -e 's/import sys\.thread\.FixedThreadPool/import FixedThreadPool/g' \
             -e 's/sys\.FileSystem/CoolFileSystem/g' \
             -e 's/FileSystem/CoolFileSystem/g' \
             -e 's/sys\.io\.File/CoolFile/g' \
@@ -154,9 +175,8 @@ jobs:
             -e 's/Sys\.getCPUThreadsCount/CoolSys.getCPUThreadsCount/g' \
             -e 's/getCPUThreadsCount()/1/g' \
             -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
-            -e 's/sys\.thread\.Thread/Dynamic/g' \
-            -e 's/sys\.thread\.Mutex/Dynamic/g' \
-            -e 's/import sys\.thread\..*;//g' \
+            -e 's/sys\.thread\.Thread/Thread/g' \
+            -e 's/sys\.thread\.Mutex/Mutex/g' \
             -e 's/cpp\.RawConstPointer\.addressOf/cast/g' \
             -e 's/cpp\.RawPointer\.addressOf/cast/g' \
             -e 's/cpp\.RawPointer/Dynamic/g' \
