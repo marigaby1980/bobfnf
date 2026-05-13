@@ -207,12 +207,15 @@ jobs:
             -e 's/sys\.thread\.Mutex/Mutex/g' \
             -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
             -e 's/DiscordRichPresence/Dynamic/g' \
+            -e 's/DiscordEventHandlers/Dynamic/g' \
             -e 's/cpp\.RawConstPointer<DiscordUser>/Dynamic/g' \
             -e 's/cpp\.RawPointer<DiscordUser>/Dynamic/g' \
             -e 's/cpp\.ConstCharStar/Dynamic/g' \
             -e 's/cpp\.CharStar/Dynamic/g' \
+            -e 's/cpp\.Function/Dynamic/g' \
+            -e 's/fromStaticFunction/function(f) return f/g' \
             {} + || true
-          
+     
           if [ -f "source/flixel/ui/FlxSoundTray.hx" ]; then
             sed -i 's/public function new(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\n&/g' source/flixel/ui/FlxSoundTray.hx || true
           fi
