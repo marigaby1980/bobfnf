@@ -68,7 +68,19 @@ jobs:
           set -e
           cd engine-source
           
-          # 1. Create Web-Specific Mocks (FileSystem/File/Sys)
+          # 1. Create a Fake FixedThreadPool in the source root to override the Standard Library
+          # This prevents the compiler from ever opening the real (broken) FixedThreadPool.hx
+          cat > source/FixedThreadPool.hx << 'EOF'
+          package;
+          class FixedThreadPool {
+              public function new(threads:Int) {}
+              public function run(f:Void->Void) { f(); }
+              public function exit() {}
+              public function shutdown() {}
+          }
+          EOF
+
+          # 2. Create Web-Specific Mocks (FileSystem/File/Sys)
           cat > source/WebFileSystem.hx << 'EOF'
           class WebFileSystem { 
             public static function absolutePath(p:String) return p; 
@@ -108,7 +120,7 @@ jobs:
           }
           EOF
 
-          # 2. Discord Mock with full compatibility
+          # 3. Discord Mock
           rm -f source/backend/Discord.hx
           mkdir -p source/backend
           cat > source/backend/Discord.hx << 'EOF'
@@ -123,7 +135,7 @@ jobs:
           }
           EOF
 
-          # 3. Aggressive Source Patching for Threading and System IO
+          # 4. Aggressive Source Patching
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
@@ -132,6 +144,7 @@ jobs:
             -e 's/import sys\.FileSystem/import WebFileSystem/g' \
             -e 's/import sys\.io\.File/import WebFile/g' \
             -e 's/import sys\.Sys/import WebSys/g' \
+            -e 's/import sys\.thread\.FixedThreadPool/import FixedThreadPool/g' \
             -e 's/sys\.FileSystem/WebFileSystem/g' \
             -e 's/FileSystem/WebFileSystem/g' \
             -e 's/sys\.io\.File/WebFile/g' \
@@ -145,9 +158,6 @@ jobs:
             -e 's/getCPUThreadsCount()/1/g' \
             -e 's/:Mutex/:Dynamic/g' \
             -e 's/:Thread/:Dynamic/g' \
-            -e 's/new FixedThreadPool(.*)/{run: function(f) f(), exit: function() {}, shutdown: function() {}}/g' \
-            -e 's/:FixedThreadPool/:Dynamic/g' \
-            -e 's/FixedThreadPool/Dynamic/g' \
             -e 's/import sys\.thread\..*;//g' \
             -e 's/cpp\.vm\.Gc\.memInfo64.*/0;/g' \
             -e 's/cpp\.RawConstPointer\.addressOf/cast/g' \
@@ -156,7 +166,7 @@ jobs:
             -e 's/FlxG\.error/FlxG.log.error/g' \
             {} + || true
 
-          # 4. Fix specific Package and Option errors
+          # 5. Fix Package and Option errors
           find source -name "FileDialogHandler.hx" -exec sed -i '/package /a import haxe.io.Path;' {} + || true
           find source -name "*SettingsSubState.hx" -exec sed -i 's/new Option(/new Option(cast /g' {} + || true
 
