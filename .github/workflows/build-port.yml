@@ -68,8 +68,7 @@ jobs:
           set -e
           cd engine-source
           
-          # 1. Create a Fake FixedThreadPool in the source root to override the Standard Library
-          # This prevents the compiler from ever opening the real (broken) FixedThreadPool.hx
+          # 1. Create a Fake FixedThreadPool to override Standard Library
           cat > source/FixedThreadPool.hx << 'EOF'
           package;
           class FixedThreadPool {
@@ -135,12 +134,13 @@ jobs:
           }
           EOF
 
-          # 4. Aggressive Source Patching
+          # 4. Patch Engine Source (Excluding our newly created Mocks)
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
           
-          find source -name "*.hx" -type f -exec sed -i \
+          # We only patch existing files, skipping the Web*.hx mocks we just made
+          find source -name "*.hx" ! -name "Web*.hx" ! -name "FixedThreadPool.hx" -type f -exec sed -i \
             -e 's/import sys\.FileSystem/import WebFileSystem/g' \
             -e 's/import sys\.io\.File/import WebFile/g' \
             -e 's/import sys\.Sys/import WebSys/g' \
