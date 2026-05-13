@@ -213,7 +213,7 @@ jobs:
             -e 's/cpp\.ConstCharStar/Dynamic/g' \
             -e 's/cpp\.CharStar/Dynamic/g' \
             -e 's/cpp\.Function/Dynamic/g' \
-            -e 's/fromStaticFunction/cast /g' \
+            -e 's/fromStaticFunction/function(f) return f/g' \
             {} + || true
           
           if [ -f "source/flixel/ui/FlxSoundTray.hx" ]; then
