@@ -44,9 +44,6 @@ jobs:
             cp -rn ../mods_upload/* assets/ || true
           fi
 
-      - name: Install Linux Font Tools
-        run: sudo apt-get install fontforge -y
-
       - name: Setup Haxe
         uses: krdlab/setup-haxe@master
         with:
@@ -66,19 +63,17 @@ jobs:
           haxelib install tjson 1.4.0 --quiet
           haxelib install flxanimate --quiet
 
-      - name: Patch HTML5 incompatible code & Fix Fonts
+      - name: Patch HTML5 incompatible code
         run: |
           set -e
           cd engine-source
           
-          # 1. Convert TTF to WOFF for web compatibility
-          find assets/fonts -name "*.ttf" -exec sh -c 'fontforge -lang=ff -c "Open(\$1); Generate(\${1%.ttf}.woff); Close();" "$1"' _ {} \; || true
-
-          # 2. Create Mocks with unique names and actual class files
-          cat > source/CoolFileSystem.hx << 'EOF'
-          class CoolFileSystem { 
+          # 1. Create Web-Specific Mocks (Using 'Web' prefix to avoid ANY browser collisions)
+          cat > source/WebFileSystem.hx << 'EOF'
+          class WebFileSystem { 
             public static function absolutePath(p:String) return p; 
             public static function exists(p:String) return false; 
+            public static function isDirectory(p:String) return false;
             public static function readDirectory(p:String):Array<String> return []; 
             public static function createDirectory(p:String) {} 
             public static function deleteFile(p:String) {} 
@@ -89,8 +84,8 @@ jobs:
           }
           EOF
           
-          cat > source/CoolFile.hx << 'EOF'
-          class CoolFile { 
+          cat > source/WebFile.hx << 'EOF'
+          class WebFile { 
             public static function getContent(p:String):String return ""; 
             public static function getBytes(p:String):Dynamic return null; 
             public static function saveContent(p:String, c:String) {} 
@@ -99,14 +94,15 @@ jobs:
           }
           EOF
           
-          cat > source/CoolSys.hx << 'EOF'
-          class CoolSys { 
+          cat > source/WebSys.hx << 'EOF'
+          class WebSys { 
             public static function exit(c:Int) {} 
             public static function sleep(t:Float) {} 
             public static function command(c:String, ?a:Array<String>) return 0; 
             public static function environment() return new Map<String, String>(); 
             public static function getEnv(n:String) return null; 
             public static function putEnv(n:String, v:String) {} 
+            public static function getCwd() return "";
             public static var print_redirect:Dynamic = null; 
             public static function getCPUThreadsCount():Int return 1; 
           }
@@ -121,28 +117,7 @@ jobs:
           }
           EOF
 
-          cat > source/Mutex.hx << 'EOF'
-          class Mutex {
-            public function new() {}
-            public function acquire() {}
-            public function release() {}
-          }
-          EOF
-
-          cat > source/Thread.hx << 'EOF'
-          class Thread {
-            public static function create(f:Void->Void) { f(); return null; }
-            public static function current():Dynamic return null;
-          }
-          EOF
-
-          mkdir -p source/hxdiscord_rpc
-          cat > source/hxdiscord_rpc/Types.hx << 'EOF'
-          package hxdiscord_rpc;
-          class Types { }
-          EOF
-          
-          # 3. Redefine Discord Logic
+          # 2. Rebuild Discord Mock with ALL missing fields
           rm -f source/backend/Discord.hx
           mkdir -p source/backend
           cat > source/backend/Discord.hx << 'EOF'
@@ -151,37 +126,44 @@ jobs:
             public static function check() {}
             public static function prepare() {}
             public static function shutdown() {}
-            public static function changePresence(d:String, s:String, ?i:String, ?b:Bool, ?e:Float) {}
+            public static function resetClientID() {}
+            public static function changePresence(details:String, state:String, ?smallImageKey:String, ?hasStartTimestamp:Bool, ?endTimestamp:Float) {}
+            public static function addPresence() {}
           }
           EOF
 
-          # 4. Patch Engine Source (Cleanly handle imports)
+          # 3. Comprehensive Source Patching
           if [ -f "Project.xml" ]; then
             sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           fi
           
           find source -name "*.hx" -type f -exec sed -i \
-            -e 's/import sys\.FileSystem/import CoolFileSystem/g' \
-            -e 's/import sys\.io\.File/import CoolFile/g' \
-            -e 's/import sys\.Sys/import CoolSys/g' \
-            -e 's/import sys\.thread\.Thread/import Thread/g' \
-            -e 's/import sys\.thread\.Mutex/import Mutex/g' \
-            -e 's/import sys\.thread\.FixedThreadPool/import FixedThreadPool/g' \
-            -e 's/sys\.FileSystem/CoolFileSystem/g' \
-            -e 's/FileSystem/CoolFileSystem/g' \
-            -e 's/sys\.io\.File/CoolFile/g' \
-            -e 's/File\.getContent/CoolFile.getContent/g' \
-            -e 's/sys\.Sys/CoolSys/g' \
-            -e 's/Sys\.getCPUThreadsCount/CoolSys.getCPUThreadsCount/g' \
+            -e 's/import sys\.FileSystem/import WebFileSystem/g' \
+            -e 's/import sys\.io\.File/import WebFile/g' \
+            -e 's/import sys\.Sys/import WebSys/g' \
+            -e 's/sys\.FileSystem/WebFileSystem/g' \
+            -e 's/FileSystem/WebFileSystem/g' \
+            -e 's/sys\.io\.File/WebFile/g' \
+            -e 's/File\.getContent/WebFile.getContent/g' \
+            -e 's/File\.saveContent/WebFile.saveContent/g' \
+            -e 's/sys\.Sys/WebSys/g' \
+            -e 's/Sys\.sleep/WebSys.sleep/g' \
+            -e 's/Sys\.getCwd/WebSys.getCwd/g' \
+            -e 's/Sys\.getCPUThreadsCount/WebSys.getCPUThreadsCount/g' \
             -e 's/getCPUThreadsCount()/1/g' \
             -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
-            -e 's/sys\.thread\.Thread/Thread/g' \
-            -e 's/sys\.thread\.Mutex/Mutex/g' \
+            -e 's/import sys\.thread\..*;//g' \
+            -e 's/cpp\.vm\.Gc\.memInfo64.*/0;/g' \
             -e 's/cpp\.RawConstPointer\.addressOf/cast/g' \
             -e 's/cpp\.RawPointer\.addressOf/cast/g' \
             -e 's/cpp\.RawPointer/Dynamic/g' \
+            -e 's/FlxG\.error/FlxG.log.error/g' \
             {} + || true
-          
+
+          # 4. Fix "String should be Bool" and Path errors
+          find source -name "*SettingsSubState.hx" -exec sed -i 's/new Option(/new Option((cast /g' {} + || true
+          find source -name "FileDialogHandler.hx" -exec sed -i '1i import haxe.io.Path;' {} + || true
+
           echo "HTML5 patching completed"
 
       - name: Optimization & Web Compile Build
