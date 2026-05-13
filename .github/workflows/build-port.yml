@@ -73,6 +73,9 @@ jobs:
           haxelib install lime --quiet
           haxelib install openfl --quiet
           haxelib install flixel 5.6.1 --quiet
+          haxelib install flixel-addons 3.2.2 --quiet
+          haxelib install flixel-ui --quiet
+          haxelib install hscript --quiet
           echo "All Haxelibs installed successfully"
 
       - name: Patch HTML5 incompatible code (Mock Sys)
