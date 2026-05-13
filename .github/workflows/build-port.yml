@@ -76,6 +76,7 @@ jobs:
           haxelib install flixel-addons 3.2.2 --quiet
           haxelib install flixel-ui --quiet
           haxelib install hscript --quiet
+          haxelib install tjson 1.4.0 --quiet
           echo "All Haxelibs installed successfully"
 
       - name: Patch HTML5 incompatible code (Mock Sys)
