@@ -54,7 +54,7 @@ jobs:
           else
             echo "Warning: No mods found in mods_upload directory"
           fi
-  
+
       - name: Install Linux Font Tools
         run: sudo apt-get install fontforge -y
 
@@ -124,6 +124,14 @@ jobs:
             public static function getEnv(name:String) return null;
             public static function putEnv(name:String, value:String) {}
             public static var print_redirect:Dynamic = null;
+          }
+          EOF
+
+          cat > source/FixedThreadPool.hx << 'EOF'
+          class FixedThreadPool {
+            public function new(threads:Int) {}
+            public function run(f:Void->Void) { f(); }
+            public function exit() {}
           }
           EOF
           
@@ -198,6 +206,7 @@ jobs:
             -e 's/sys\.Sys/Sys/g' \
             -e 's/sys\.Thread/Thread/g' \
             -e 's/sys\.thread\.Mutex/Mutex/g' \
+            -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
             {} + || true
           
           # Fix FlxSoundTray if it exists
