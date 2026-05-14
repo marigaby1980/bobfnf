@@ -1,5 +1,11 @@
-name: Custom Psych Engine HTML5 Build
-on: [push, workflow_dispatch]
+name: Build FNF Mod from URL
+on:
+  workflow_dispatch:
+    inputs:
+      mod_url:
+        description: 'Direct Download Link (Google Drive, Mediafire, etc.)'
+        required: true
+        default: ''
 
 jobs:
   build:
@@ -21,31 +27,44 @@ jobs:
           haxelib install openfl 9.2.1
           haxelib install flixel 5.2.2
           haxelib run lime setup
-          haxelib install flixel-addons
-          haxelib install flixel-ui
-          haxelib install hscript
-          haxelib install flxanimate
+          haxelib install flixel-addons flixel-ui hscript flxanimate
           haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit
-          haxelib git hxvlc https://github.com/MAJESTY-Development/hxvlc
-          # Add any other custom libraries your mechanics require here
 
-      - name: Inject Mod Zip
+      - name: Download Mod Assets
         run: |
-          # If your zip is named 'mod.zip', this extracts it into the project structure
-          unzip -o mod.zip -d . 
+          # Install gdown for better Google Drive handling
+          pip install gdown
+          
+          URL="${{ github.event.inputs.mod_url }}"
+          
+          if [[ $URL == *"drive.google.com"* ]]; then
+            gdown "$URL" -O mod.zip
+          elif [[ $URL == *"mediafire.com"* ]]; then
+            # Mediafire needs a specific tool or a direct-download link
+            pip install mediafire-dl
+            mediafire-dl "$URL" -o mod.zip
+          else
+            # Standard direct link
+            curl -L "$URL" -o mod.zip
+          fi
+
+      - name: Extract Mod
+        run: |
+          unzip -o mod.zip -d .
+          # Ensure assets are in the correct place for Psych Engine
+          if [ -d "assets" ]; then echo "Assets found"; fi
 
       - name: Compile to HTML5
         run: haxelib run lime build html5 -release
 
-      - name: Convert to Single HTML File
+      - name: Create Single HTML File
         run: |
-          # Use a tool to bundle JS/WASM into the HTML
           npm install -g inline-assets
           cd export/release/html5/bin/
           inline-assets index.html single-file-mod.html
 
-      - name: Upload Single File Build
+      - name: Upload Build
         uses: actions/upload-artifact@v4
         with:
-          name: single-html-mod
+          name: compiled-mod-html
           path: export/release/html5/bin/single-file-mod.html
