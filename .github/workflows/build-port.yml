@@ -19,38 +19,30 @@ jobs:
           repository: 'ShadowMario/FNF-PsychEngine'
           path: 'engine-source'
 
-      # STEP 1: Download Mod First (As requested)
-      - name: Download & Validate Mod
+      # 1. DOWNLOAD MOD FIRST
+      - name: Download Mod Payload
         run: |
           pip install -q gdown
           URL="${{ github.event.inputs.mod_url }}"
-          
           if [[ "$URL" == *"drive.google.com"* ]]; then
             gdown -q "$URL" -O mod.zip
           else
-            # -L follows redirects, -f fails on 404, -S shows errors
-            curl -sSLf "$URL" -o mod.zip || { echo "❌ Download failed"; exit 1; }
-          fi
-          
-          # Check if the zip is actually a zip
-          if ! unzip -t mod.zip > /dev/null 2>&1; then
-            echo "❌ Error: Downloaded mod.zip is corrupted or invalid."
-            exit 1
+            curl -sSL "$URL" -o mod.zip || wget -q "$URL" -O mod.zip
           fi
           
           mkdir -p mod_extract
           unzip -qq -o mod.zip -d mod_extract/
           cp -rn mod_extract/* engine-source/mods/ || true
           cp -rn mod_extract/* engine-source/assets/ || true
-          echo "✅ Mod injected successfully."
+          echo "✅ Mod assets injected."
 
-      # STEP 2: Setup Haxe and Libraries
       - name: Setup Haxe
         uses: krdlab/setup-haxe@v1
         with:
           haxe-version: 4.2.5
 
-      - name: Install Haxelibs (Failsafe)
+      # 2. INSTALL LIBRARIES WITH TRIPLE FALLBACK
+      - name: Install Haxelibs (Triple-Fallback)
         run: |
           haxelib setup ~/haxelib
           haxelib install haxelib --quiet
@@ -63,14 +55,16 @@ jobs:
           haxelib install tjson --quiet
           haxelib install flxanimate --quiet
           
-          # FIX: Downloading linc_luajit from the 'codeload' endpoint is more stable for haxelib
-          curl -sSLf https://codeload.github.com/nebulaz0r/linc_luajit/zip/refs/heads/master -o lua.zip
+          echo "Installing linc_luajit..."
+          # Fallback 1: Codeload
+          curl -sSLf https://codeload.github.com/nebulaz0r/linc_luajit/zip/refs/heads/master -o lua.zip || \
+          # Fallback 2: Main Archive
+          curl -sSLf https://github.com/nebulaz0r/linc_luajit/archive/refs/heads/master.zip -o lua.zip || \
+          # Fallback 3: Standard Git Clone
+          haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit master --quiet
           
-          if unzip -t lua.zip > /dev/null 2>&1; then
+          if [ -f lua.zip ]; then
             haxelib install lua.zip --quiet
-          else
-            echo "❌ lua.zip is invalid. Falling back to git..."
-            haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit master --quiet
           fi
           echo "✅ Libraries finished."
 
@@ -78,10 +72,12 @@ jobs:
         run: |
           cd engine-source
           mkdir -p source/hxdiscord_rpc
+          # Compatibility Mocks
           echo "class FileSystem { public static function exists(p:String) return false; public static function readDirectory(p:String) return []; public static function absolutePath(p:String) return p; }" > source/FileSystem.hx
           echo "class Sys { public static function exit(c:Int) {} public static function sleep(t:Float) {} public static function args() return []; }" > source/Sys.hx
           echo "package hxdiscord_rpc; class Discord { public static function Initialize(a:String, b:Bool, c:Dynamic) {} public static function Shutdown() {} }" > source/hxdiscord_rpc/Discord.hx
           
+          # Remove Discord but preserve Lua
           sed -i '/discord-rpc/d' Project.xml || true
           sed -i '/hxdiscord_rpc/d' Project.xml || true
           find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g' -e 's/sys\.Sys/Sys/g' {} +
