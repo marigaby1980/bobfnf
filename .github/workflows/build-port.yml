@@ -28,7 +28,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -qq libvlc-dev libvlccore-dev -y > /dev/null
 
-      - name: Install Haxe Libraries (Silent)
+           - name: Install Haxe Libraries (Silent)
         run: |
           haxelib setup ~/haxelib
           
@@ -44,9 +44,11 @@ jobs:
           haxelib install hscript --quiet
           haxelib install flxanimate --quiet
           
-          # FIX: Proper syntax for haxelib git (URL then optional branch then flag)
-          # We use 'master' or 'main' explicitly to prevent it from getting stuck
-          haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit master --force --quiet
+          # THE FIX: Download linc_luajit as a ZIP and install locally, bypassing git clone
+          curl -sL https://github.com/nebulaz0r/linc_luajit/archive/refs/heads/master.zip -o linc_luajit.zip
+          haxelib local linc_luajit.zip --quiet
+          
+          # Install the remaining git libraries (These usually clone without issue)
           haxelib git hxvlc https://github.com/MAJESTY-Development/hxvlc master --force --quiet
           haxelib git faxe https://github.com/uhyolive/faxe master --force --quiet
           haxelib git polymod https://github.com/mastereric/polymod master --force --quiet
