@@ -28,7 +28,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -qq libvlc-dev libvlccore-dev -y > /dev/null
 
-           - name: Install Haxe Libraries (Silent)
+      - name: Install Haxe Libraries (Silent)
         run: |
           haxelib setup ~/haxelib
           
@@ -48,7 +48,7 @@ jobs:
           curl -sL https://github.com/nebulaz0r/linc_luajit/archive/refs/heads/master.zip -o linc_luajit.zip
           haxelib local linc_luajit.zip --quiet
           
-          # Install the remaining git libraries (These usually clone without issue)
+          # Install the remaining git libraries
           haxelib git hxvlc https://github.com/MAJESTY-Development/hxvlc master --force --quiet
           haxelib git faxe https://github.com/uhyolive/faxe master --force --quiet
           haxelib git polymod https://github.com/mastereric/polymod master --force --quiet
