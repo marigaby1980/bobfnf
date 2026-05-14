@@ -1,199 +1,51 @@
-name: Build FNF Web Port
-
-on:
-  workflow_dispatch:
-    inputs:
-      mod_url:
-        description: 'Direct URL to your mod .zip file'
-        required: true
-        type: string
+name: Custom Psych Engine HTML5 Build
+on: [push, workflow_dispatch]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+
     steps:
-      - name: Checkout Base Engine
+      - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          repository: 'ShadowMario/FNF-PsychEngine'
-          path: 'engine-source'
-
-      - name: Download Mod Payload
-        run: |
-          set -e
-          pip install gdown --quiet
-          URL="${{ github.event.inputs.mod_url }}"
-          if [[ "$URL" == *"drive.google.com"* ]]; then
-            gdown "$URL" -O mod-payload.zip || exit 1
-          else
-            wget -q -O mod-payload.zip "$URL" || exit 1
-          fi
-          mkdir -p mods_upload
-          unzip -q mod-payload.zip -d mods_upload/ || exit 1
-          rm mod-payload.zip
-
-      - name: Inject Mods into Engine
-        run: |
-          set -e
-          cd engine-source
-          mkdir -p mods assets
-          if [ -d "../mods_upload" ]; then
-            cp -rn ../mods_upload/* mods/ || true
-            cp -rn ../mods_upload/* assets/ || true
-          fi
 
       - name: Setup Haxe
-        uses: krdlab/setup-haxe@master
+        uses: krdlab/setup-haxe@v1
         with:
-          haxe-version: 4.3.6
+          haxe-version: 4.2.5
 
-      - name: Install Haxelibs and Dependencies
+      - name: Install Haxe Libraries
         run: |
-          set -e
-          cd engine-source
           haxelib setup ~/haxelib
-          haxelib install lime --quiet
-          haxelib install openfl --quiet
-          haxelib install flixel 5.6.1 --quiet
-          haxelib install flixel-addons 3.2.2 --quiet
-          haxelib install flixel-ui --quiet
-          haxelib install hscript --quiet
-          haxelib install tjson 1.4.0 --quiet
-          haxelib install flxanimate --quiet
+          haxelib install lime 8.0.1
+          haxelib install openfl 9.2.1
+          haxelib install flixel 5.2.2
+          haxelib run lime setup
+          haxelib install flixel-addons
+          haxelib install flixel-ui
+          haxelib install hscript
+          haxelib install flxanimate
+          haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit
+          haxelib git hxvlc https://github.com/MAJESTY-Development/hxvlc
+          # Add any other custom libraries your mechanics require here
 
-      - name: Patch HTML5 incompatible code
+      - name: Inject Mod Zip
         run: |
-          set -e
-          cd engine-source
-          
-          # 1. FORCE DISABLE #error in Haxe Standard Library
-          # This targets the specific file causing your latest crash
-          HAXE_STD_PATH="/opt/hostedtoolcache/haxe/4.3.6/x64/std"
-          sudo sed -i 's/#error/\/\/#error/g' "$HAXE_STD_PATH/sys/thread/FixedThreadPool.hx" || true
-          sudo sed -i 's/#error/\/\/#error/g' "$HAXE_STD_PATH/sys/thread/Mutex.hx" || true
-          sudo sed -i 's/#error/\/\/#error/g' "$HAXE_STD_PATH/sys/thread/Thread.hx" || true
+          # If your zip is named 'mod.zip', this extracts it into the project structure
+          unzip -o mod.zip -d . 
 
-          # 2. Create Web-Specific Mocks
-          cat > source/WebFileSystem.hx << 'EOF'
-          class WebFileSystem { 
-            public static function absolutePath(p:String) return p; 
-            public static function exists(p:String) return false; 
-            public static function isDirectory(p:String) return false;
-            public static function readDirectory(p:String):Array<String> return []; 
-            public static function createDirectory(p:String) {} 
-            public static function deleteFile(p:String) {} 
-            public static function deleteDirectory(p:String) {} 
-            public static function rename(p:String, n:String) {} 
-            public static function stat(p:String) return null; 
-            public static function fullPath(r:String) return r; 
-          }
-          EOF
-          
-          cat > source/WebFile.hx << 'EOF'
-          class WebFile { 
-            public static function getContent(p:String):String return ""; 
-            public static function getBytes(p:String):Dynamic return null; 
-            public static function saveContent(p:String, c:String) {} 
-            public static function saveBytes(p:String, b:Dynamic) {} 
-            public static function append(p:String, c:String) {} 
-          }
-          EOF
-          
-          cat > source/WebSys.hx << 'EOF'
-          class WebSys { 
-            public static function exit(c:Int) {} 
-            public static function sleep(t:Float) {} 
-            public static function command(c:String, ?a:Array<String>) return 0; 
-            public static function environment() return new Map<String, String>(); 
-            public static function getEnv(n:String) return null; 
-            public static function putEnv(n:String, v:String) {} 
-            public static function getCwd() return "";
-            public static var print_redirect:Dynamic = null; 
-            public static function getCPUThreadsCount():Int return 1; 
-          }
-          EOF
+      - name: Compile to HTML5
+        run: haxelib run lime build html5 -release
 
-          # 3. Enhanced Discord Mock
-          rm -f source/backend/Discord.hx
-          mkdir -p source/backend
-          cat > source/backend/Discord.hx << 'EOF'
-          package backend;
-          class DiscordClient {
-            public static function check() {}
-            public static function prepare() {}
-            public static function shutdown() {}
-            public static function resetClientID() {}
-            public static function changePresence(details:String, ?state:String, ?smallImageKey:String, ?hasStartTimestamp:Bool, ?endTimestamp:Float) {}
-            public static function addPresence() {}
-          }
-          EOF
-
-          # 4. Patch Engine Source
-          if [ -f "Project.xml" ]; then
-            sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
-          fi
-          
-          find source -name "*.hx" ! -name "Web*.hx" -type f -exec sed -i \
-            -e 's/import sys\.FileSystem/import WebFileSystem/g' \
-            -e 's/import sys\.io\.File/import WebFile/g' \
-            -e 's/import sys\.Sys/import WebSys/g' \
-            -e 's/sys\.FileSystem/WebFileSystem/g' \
-            -e 's/FileSystem/WebFileSystem/g' \
-            -e 's/sys\.io\.File/WebFile/g' \
-            -e 's/File\.getContent/WebFile.getContent/g' \
-            -e 's/File\.saveContent/WebFile.saveContent/g' \
-            -e 's/File\.getBytes/WebFile.getBytes/g' \
-            -e 's/sys\.Sys/WebSys/g' \
-            -e 's/Sys\.sleep/WebSys.sleep/g' \
-            -e 's/Sys\.getCwd/WebSys.getCwd/g' \
-            -e 's/Sys\.getCPUThreadsCount/WebSys.getCPUThreadsCount/g' \
-            -e 's/getCPUThreadsCount()/1/g' \
-            -e 's/:Mutex/:Dynamic/g' \
-            -e 's/new Mutex()/cast {}/g' \
-            -e 's/:Thread/:Dynamic/g' \
-            -e 's/new FixedThreadPool(.*)/cast {}/g' \
-            -e 's/:FixedThreadPool/:Dynamic/g' \
-            -e 's/cpp\.vm\.Gc\.memInfo64.*/0;/g' \
-            -e 's/cpp\.RawConstPointer\.addressOf/cast/g' \
-            -e 's/cpp\.RawPointer\.addressOf/cast/g' \
-            -e 's/cpp\.RawPointer/Dynamic/g' \
-            -e 's/FlxG\.error/FlxG.log.error/g' \
-            {} + || true
-
-          # 5. Fix Package and Options
-          find source -name "FileDialogHandler.hx" -exec sed -i '/package /a import haxe.io.Path;' {} + || true
-          find source/options -name "*SettingsSubState.hx" -exec sed -i 's/new Option(\([^,]*\), \([^,]*\),/new Option(\1, cast \2,/g' {} + || true
-
-          echo "HTML5 patching completed"
-
-      - name: Optimization & Web Compile Build
+      - name: Convert to Single HTML File
         run: |
-          set -e
-          cd engine-source
-          haxelib run lime build html5 -release -D DISCORD_DISABLE -D NO_PRELOAD_ALL 2> build_log.txt || {
-            cat build_log.txt
-            if grep -q "ERROR" build_log.txt; then exit 1; fi
-          }
+          # Use a tool to bundle JS/WASM into the HTML
+          npm install -g inline-assets
+          cd export/release/html5/bin/
+          inline-assets index.html single-file-mod.html
 
-      - name: Package Flat ZIP
-        run: |
-          set -e
-          BUILD_DIR="engine-source/export/release/html5/bin"
-          cd "$BUILD_DIR"
-          MAIN_JS=$(ls *.js | grep -v 'howler' | head -n 1)
-          mv "$MAIN_JS" funkin.js && sed -i "s/$MAIN_JS/funkin.js/g" index.html || true
-          zip -r ../../../../../web_export.zip .
-
-      - name: Upload & Publish
-        run: |
-          set -e
-          BUILD_DIR="engine-source/export/release/html5/bin"
-          cd "$BUILD_DIR"
-          git init
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
-          git commit -m "Web Build Port"
-          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build
+      - name: Upload Single File Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: single-html-mod
+          path: export/release/html5/bin/single-file-mod.html
