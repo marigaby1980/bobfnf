@@ -19,61 +19,69 @@ jobs:
           repository: 'ShadowMario/FNF-PsychEngine'
           path: 'engine-source'
 
+      # STEP 1: Download Mod First (As requested)
+      - name: Download & Validate Mod
+        run: |
+          pip install -q gdown
+          URL="${{ github.event.inputs.mod_url }}"
+          
+          if [[ "$URL" == *"drive.google.com"* ]]; then
+            gdown -q "$URL" -O mod.zip
+          else
+            # -L follows redirects, -f fails on 404, -S shows errors
+            curl -sSLf "$URL" -o mod.zip || { echo "❌ Download failed"; exit 1; }
+          fi
+          
+          # Check if the zip is actually a zip
+          if ! unzip -t mod.zip > /dev/null 2>&1; then
+            echo "❌ Error: Downloaded mod.zip is corrupted or invalid."
+            exit 1
+          fi
+          
+          mkdir -p mod_extract
+          unzip -qq -o mod.zip -d mod_extract/
+          cp -rn mod_extract/* engine-source/mods/ || true
+          cp -rn mod_extract/* engine-source/assets/ || true
+          echo "✅ Mod injected successfully."
+
+      # STEP 2: Setup Haxe and Libraries
       - name: Setup Haxe
         uses: krdlab/setup-haxe@v1
         with:
           haxe-version: 4.2.5
 
-      - name: Install Haxelibs (Force Non-Interactive)
+      - name: Install Haxelibs (Failsafe)
         run: |
           haxelib setup ~/haxelib
-          
-          # 1. Update haxelib first to stop the version warnings
           haxelib install haxelib --quiet
-          
-          # 2. Install core libraries one by one
           haxelib install lime 8.0.1 --quiet
           haxelib install openfl 9.2.1 --quiet
           haxelib install flixel 5.2.2 --quiet
-          
-          # 3. Skip 'lime setup' - it is not needed for the build and causes freezes
-          
           haxelib install flixel-addons 3.2.1 --quiet
           haxelib install flixel-ui 2.5.0 --quiet
           haxelib install hscript --quiet
           haxelib install tjson --quiet
           haxelib install flxanimate --quiet
           
-          # 4. Install Lua via direct ZIP to bypass Git cloning issues
-          curl -sL https://github.com/nebulaz0r/linc_luajit/archive/refs/heads/master.zip -o lua.zip
-          haxelib install lua.zip --quiet
-          echo "✅ All libraries installed without prompts."
-
-      - name: Download & Inject Mod
-        run: |
-          pip install -q gdown
-          URL="${{ github.event.inputs.mod_url }}"
-          if [[ "$URL" == *"drive.google.com"* ]]; then
-            gdown -q "$URL" -O mod.zip
+          # FIX: Downloading linc_luajit from the 'codeload' endpoint is more stable for haxelib
+          curl -sSLf https://codeload.github.com/nebulaz0r/linc_luajit/zip/refs/heads/master -o lua.zip
+          
+          if unzip -t lua.zip > /dev/null 2>&1; then
+            haxelib install lua.zip --quiet
           else
-            curl -sL "$URL" -o mod.zip
+            echo "❌ lua.zip is invalid. Falling back to git..."
+            haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit master --quiet
           fi
-          mkdir -p mod_extract
-          unzip -qq -o mod.zip -d mod_extract/
-          # [span_0](start_span)Inject mod into the engine source[span_0](end_span)
-          cp -rn mod_extract/* engine-source/mods/ || true
-          cp -rn mod_extract/* engine-source/assets/ || true
+          echo "✅ Libraries finished."
 
       - name: Patch for Web Compatibility
         run: |
           cd engine-source
-          # [span_1](start_span)[span_2](start_span)Create mock classes to prevent desktop-only crashes[span_1](end_span)[span_2](end_span)
           mkdir -p source/hxdiscord_rpc
           echo "class FileSystem { public static function exists(p:String) return false; public static function readDirectory(p:String) return []; public static function absolutePath(p:String) return p; }" > source/FileSystem.hx
           echo "class Sys { public static function exit(c:Int) {} public static function sleep(t:Float) {} public static function args() return []; }" > source/Sys.hx
           echo "package hxdiscord_rpc; class Discord { public static function Initialize(a:String, b:Bool, c:Dynamic) {} public static function Shutdown() {} }" > source/hxdiscord_rpc/Discord.hx
           
-          # [span_3](start_span)Remove Discord references but keep Lua for combat mechanics[span_3](end_span)
           sed -i '/discord-rpc/d' Project.xml || true
           sed -i '/hxdiscord_rpc/d' Project.xml || true
           find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g' -e 's/sys\.Sys/Sys/g' {} +
@@ -81,18 +89,14 @@ jobs:
       - name: Build Web Target
         run: |
           cd engine-source
-          # -[span_4](start_span)D DISCORD_DISABLE is mandatory for web stability[span_4](end_span)
           haxelib run lime build html5 -release -D DISCORD_DISABLE
 
       - name: Standardize and Publish
         run: |
           cd engine-source/export/release/html5/bin
-          # [span_5](start_span)Rename output for cleaner hosting[span_5](end_span)
           MAIN_JS=$(ls *.js | grep -v 'howler' | head -n 1)
           mv "$MAIN_JS" funkin.js
           sed -i "s/$MAIN_JS/funkin.js/g" index.html
-          
-          # [span_6](start_span)[span_7](start_span)Push to web-build branch[span_6](end_span)[span_7](end_span)
           git init
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
