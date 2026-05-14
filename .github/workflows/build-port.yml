@@ -1,9 +1,9 @@
-name: Psych Engine HTML5 Compiler (Silent)
+name: Psych Engine Web Port (Stable)
 on:
   workflow_dispatch:
     inputs:
       mod_url:
-        description: 'Direct Link to Mod Zip'
+        description: 'Direct Link to Mod (.zip)'
         required: true
         default: ''
 
@@ -13,82 +13,97 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      [span_3](start_span)contents: write # Needed for auto-publishing to branch[span_3](end_span)
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Base Engine
         uses: actions/checkout@v4
+        with:
+          [span_4](start_span)repository: 'ShadowMario/FNF-PsychEngine' # Uses standard Psych Engine as base[span_4](end_span)
+          path: 'engine-source'
 
       - name: Setup Haxe
         uses: krdlab/setup-haxe@v1
         with:
-          haxe-version: 4.2.5
+          haxe-version: 4.2.5 # Psych Engine is most stable on 4.2.5
 
-      - name: Install System Dependencies (Silent)
+      - name: Install Dependencies (Silent)
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -qq libvlc-dev libvlccore-dev -y > /dev/null
-
-      - name: Install Haxe Libraries (Silent)
-        run: |
+          sudo apt-get update -qq && sudo apt-get install -qq libvlc-dev libvlccore-dev -y > /dev/null
           haxelib setup ~/haxelib
-          
-          # Core Framework
           haxelib install lime 8.0.1 --quiet
           haxelib install openfl 9.2.1 --quiet
           haxelib install flixel 5.2.2 --quiet
           haxelib run lime setup --quiet
+          haxelib install flixel-addons flixel-ui hscript flxanimate --quiet
           
-          # UI and Scripting
-          haxelib install flixel-addons --quiet
-          haxelib install flixel-ui --quiet
-          haxelib install hscript --quiet
-          haxelib install flxanimate --quiet
-          
-          # THE FIX: Download linc_luajit as a ZIP and install locally, bypassing git clone
+          # STABILITY FIX: Use ZIP method for Lua/Video support
           curl -sL https://github.com/nebulaz0r/linc_luajit/archive/refs/heads/master.zip -o linc_luajit.zip
-          haxelib local linc_luajit.zip --quiet
-          
-          # Install the remaining git libraries
-          haxelib git hxvlc https://github.com/MAJESTY-Development/hxvlc master --force --quiet
-          haxelib git faxe https://github.com/uhyolive/faxe master --force --quiet
-          haxelib git polymod https://github.com/mastereric/polymod master --force --quiet
-          
-          echo "✅ All Haxe libraries installed."
+          haxelib install linc_luajit.zip --quiet
+          curl -sL https://github.com/MAJESTY-Development/hxvlc/archive/refs/heads/master.zip -o hxvlc.zip
+          haxelib install hxvlc.zip --quiet
 
-      - name: Download Mod Assets (Silent)
+      - name: Download & Inject Mod
         run: |
-          pip install -q gdown mediafire-dl
-          
+          pip install -q gdown
           URL="${{ github.event.inputs.mod_url }}"
-          
-          if [[ $URL == *"drive.google.com"* ]]; then
+          if [[ "$URL" == *"drive.google.com"* ]]; then
             gdown -q "$URL" -O mod.zip
-          elif [[ $URL == *"mediafire.com"* ]]; then
-            mediafire-dl "$URL" -o mod.zip > /dev/null
           else
             curl -sL "$URL" -o mod.zip
           fi
-          echo "✅ Mod downloaded."
+          unzip -qq -o mod.zip -d mod_content/
+          # [span_5](start_span)Inject mod into the engine source[span_5](end_span)
+          cp -rn mod_content/* engine-source/mods/ || true
+          cp -rn mod_content/* engine-source/assets/ || true
 
-      - name: Extract Mod Zip
+      - name: Compatibility Patch (HTML5 Mocks)
         run: |
-          unzip -qq -o mod.zip -d .
-          echo "✅ Assets extracted."
+          cd engine-source
+          # [span_6](start_span)[span_7](start_span)[span_8](start_span)Create mock classes to prevent crashes on web[span_6](end_span)[span_7](end_span)[span_8](end_span)
+          mkdir -p source/hxdiscord_rpc
+          cat > source/FileSystem.hx << 'EOF'
+          class FileSystem { public static function exists(p:String) return false; public static function readDirectory(p:String) return []; }
+          EOF
+          cat > source/Sys.hx << 'EOF'
+          class Sys { public static function exit(c:Int) {} public static function sleep(t:Float) {} }
+          EOF
+          cat > source/hxdiscord_rpc/Discord.hx << 'EOF'
+          package hxdiscord_rpc; class Discord { public static function Initialize(a:String, b:Bool, c:Dynamic) {} public static function Shutdown() {} }
+          EOF
+          
+          # [span_9](start_span)Patch Project.xml to disable Discord but KEEP Lua[span_9](end_span)
+          sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' Project.xml || true
+          
+          # [span_10](start_span)Replace sys calls with our mocks[span_10](end_span)
+          find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g' -e 's/sys\.Sys/Sys/g' {} + || true
 
-      - name: Compile to HTML5
+      - name: Compile HTML5
         run: |
-          haxelib run lime clean html5 -quiet
-          haxelib run lime build html5 -release -quiet
+          cd engine-source
+          # [span_11](start_span)DISCORD_DISABLE is critical for web stability[span_11](end_span)
+          haxelib run lime build html5 -release -D DISCORD_DISABLE -D NO_PRELOAD_ALL
 
-      - name: Convert to Single HTML File (Silent)
+      - name: Auto-Publish to Web Branch
+        run: |
+          cd engine-source/export/release/html5/bin
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Web Build: $(date)"
+          # [span_12](start_span)Pushes to 'web-build' branch for instant hosting[span_12](end_span)
+          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build
+
+      - name: Create Single HTML Artifact
         run: |
           npm install -g inline-assets --silent
-          cd export/release/html5/bin/
-          inline-assets index.html single-file-mod.html > /dev/null
-          echo "✅ Single-file HTML generated."
+          cd engine-source/export/release/html5/bin
+          inline-assets index.html ../../../../standalone-mod.html > /dev/null
 
-      - name: Upload Final Build
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Psych-Engine-Single-File
-          path: export/release/html5/bin/single-file-mod.html
+          name: Standalone-HTML
+          path: standalone-mod.html
