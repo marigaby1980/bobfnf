@@ -1,4 +1,4 @@
-name: Build FNF Web Port (Stable)
+name: Build FNF Web Port
 on:
   workflow_dispatch:
     inputs:
@@ -11,102 +11,95 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      [span_3](start_span)contents: write # Allows publishing to the web-build branch[span_3](end_span)
+      contents: write
     steps:
       - name: Checkout Base Engine
         uses: actions/checkout@v4
         with:
-          [span_4](start_span)repository: 'ShadowMario/FNF-PsychEngine' #[span_4](end_span)
+          repository: 'ShadowMario/FNF-PsychEngine'
           path: 'engine-source'
 
       - name: Setup Haxe
         uses: krdlab/setup-haxe@v1
         with:
-          [span_5](start_span)haxe-version: 4.3.6 # Using the newer version from your base[span_5](end_span)
+          haxe-version: 4.2.5 # Stick to 4.2.5 for Psych Engine stability
 
-      - name: Install Haxelibs (Optimized)
+      - name: Install Haxelibs (Individually)
         run: |
           haxelib setup ~/haxelib
+          # Install core one by one to avoid dependency conflicts
           haxelib install lime 8.0.1 --quiet
           haxelib install openfl 9.2.1 --quiet
-          haxelib install flixel 5.5.0 --quiet
+          haxelib install flixel 5.2.2 --quiet
           haxelib run lime setup
-          # [span_6](start_span)Install dependencies individually to prevent the "No such version" error[span_6](end_span)
           haxelib install flixel-addons 3.2.1 --quiet
           haxelib install flixel-ui --quiet
           haxelib install hscript --quiet
           haxelib install tjson --quiet
           haxelib install flxanimate --quiet
-          # Use ZIP method for libraries that often fail to clone via Git
+          
+          # Use the ZIP method for Lua to bypass the cloning errors seen in your logs
           curl -sL https://github.com/nebulaz0r/linc_luajit/archive/refs/heads/master.zip -o lua.zip
           haxelib install lua.zip --quiet
-          echo "✅ All libraries installed."
+          echo "✅ Libraries finished."
 
-      - name: Download & Extract Mod
+      - name: Download & Inject Mod
         run: |
           pip install -q gdown
           URL="${{ github.event.inputs.mod_url }}"
           if [[ "$URL" == *"drive.google.com"* ]]; then
             gdown -q "$URL" -O mod.zip
           else
-            [span_7](start_span)wget -q -O mod.zip "$URL" #[span_7](end_span)
+            curl -sL "$URL" -o mod.zip
           fi
           mkdir -p mod_extract
-          [span_8](start_span)unzip -q mod.zip -d mod_extract/ #[span_8](end_span)
-          # Inject files into the source
-          [span_9](start_span)cp -rn mod_extract/* engine-source/mods/ || true #[span_9](end_span)
+          unzip -qq -o mod.zip -d mod_extract/
+          cp -rn mod_extract/* engine-source/mods/ || true
           cp -rn mod_extract/* engine-source/assets/ || true
 
-      - name: HTML5 Compatibility Patching
+      - name: Patch for Web Compatibility
         run: |
           cd engine-source
-          # [span_10](start_span)[span_11](start_span)[span_12](start_span)Create mock classes to fake desktop features on Web[span_10](end_span)[span_11](end_span)[span_12](end_span)
-          cat > source/FileSystem.hx << 'EOF'
-          class FileSystem { 
-            public static function exists(p:String) return false; 
-            public static function readDirectory(p:String) return []; 
-            public static function absolutePath(p:String) return p;
-          }
-          EOF
-          cat > source/Sys.hx << 'EOF'
-          class Sys { public static function exit(c:Int) {} public static function sleep(t:Float) {} }
-          EOF
-          
-          # [span_13](start_span)Patch Project.xml: Disable Discord but keep Lua for your custom mechanics[span_13](end_span)
+          # Remove Discord from Project.xml but KEEP linc_luajit
           sed -i '/discord-rpc/d' Project.xml || true
+          sed -i '/hxdiscord_rpc/d' Project.xml || true
           
-          # [span_14](start_span)Replace system calls with our new mocks[span_14](end_span)
+          # Create Mocks to prevent desktop-only crashes
+          mkdir -p source/hxdiscord_rpc
+          echo "class FileSystem { public static function exists(p:String) return false; public static function readDirectory(p:String) return []; public static function absolutePath(p:String) return p; }" > source/FileSystem.hx
+          echo "class Sys { public static function exit(c:Int) {} public static function sleep(t:Float) {} public static function args() return []; }" > source/Sys.hx
+          echo "package hxdiscord_rpc; class Discord { public static function Initialize(a:String, b:Bool, c:Dynamic) {} public static function Shutdown() {} }" > source/hxdiscord_rpc/Discord.hx
+
+          # Force the engine to use our mock classes instead of system ones
           find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g' -e 's/sys\.Sys/Sys/g' {} +
 
       - name: Build Web Target
         run: |
           cd engine-source
-          # [span_15](start_span)Compile with optimization flags[span_15](end_span)
-          haxelib run lime build html5 -release -D DISCORD_DISABLE -D NO_PRELOAD_ALL
+          haxelib run lime build html5 -release -D DISCORD_DISABLE
 
       - name: Standardize and Publish
         run: |
           cd engine-source/export/release/html5/bin
-          # [span_16](start_span)Rename the output for cleaner hosting[span_16](end_span)
+          # Clean up the JS filename for the web branch
           MAIN_JS=$(ls *.js | grep -v 'howler' | head -n 1)
           mv "$MAIN_JS" funkin.js
           sed -i "s/$MAIN_JS/funkin.js/g" index.html
           
-          # [span_17](start_span)[span_18](start_span)Auto-publish to the web-build branch[span_17](end_span)[span_18](end_span)
           git init
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Automated Web Build"
+          git commit -m "Web Build $(date)"
           git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build
 
-      - name: Generate Standalone HTML
+      - name: Generate Standalone Artifact
         run: |
           npm install -g inline-assets --silent
           cd engine-source/export/release/html5/bin
           inline-assets index.html ../../../../index.html > /dev/null
 
-      - name: Upload Single File
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Standalone-Web-Mod
