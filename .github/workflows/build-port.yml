@@ -1,11 +1,14 @@
-name: Psych Engine HTML5 Compiler
+name: Psych Engine HTML5 Compiler (Silent)
 on:
   workflow_dispatch:
     inputs:
       mod_url:
-        description: 'Direct Link to Mod Zip (Google Drive, Mediafire, or Direct)'
+        description: 'Direct Link to Mod Zip'
         required: true
         default: ''
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
@@ -14,75 +17,73 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          submodules: true # Ensures submodules are pulled if present
 
       - name: Setup Haxe
         uses: krdlab/setup-haxe@v1
         with:
           haxe-version: 4.2.5
 
-      - name: Install System Dependencies
+      - name: Install System Dependencies (Silent)
         run: |
-          sudo apt-get update
-          sudo apt-get install libvlc-dev libvlccore-dev -y
+          sudo apt-get update -qq
+          sudo apt-get install -qq libvlc-dev libvlccore-dev -y > /dev/null
 
-      - name: Install Haxe Libraries
+      - name: Install Haxe Libraries (Silent)
         run: |
           haxelib setup ~/haxelib
-          # Core Framework
-          haxelib install lime 8.0.1
-          haxelib install openfl 9.2.1
-          haxelib install flixel 5.2.2
-          haxelib run lime setup
+          
+          # Core Framework - Using --quiet to suppress download progress
+          haxelib install lime 8.0.1 --quiet
+          haxelib install openfl 9.2.1 --quiet
+          haxelib install flixel 5.2.2 --quiet
+          haxelib run lime setup --quiet
           
           # UI and Scripting
-          haxelib install flixel-addons
-          haxelib install flixel-ui
-          haxelib install hscript
-          haxelib install flxanimate
+          haxelib install flixel-addons --quiet
+          haxelib install flixel-ui --quiet
+          haxelib install hscript --quiet
+          haxelib install flxanimate --quiet
           
-          # Psych Engine Specifics (Using the most stable git links)
-          haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit.git
-          haxelib git hxvlc https://github.com/MAJESTY-Development/hxvlc.git
-          haxelib git faxe https://github.com/uhyolive/faxe.git
-          haxelib git polymod https://github.com/mastereric/polymod.git
+          # Git Libraries - Using --quiet to suppress cloning details
+          haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit --force --quiet
+          haxelib git hxvlc https://github.com/MAJESTY-Development/hxvlc --force --quiet
+          haxelib git faxe https://github.com/uhyolive/faxe --force --quiet
+          haxelib git polymod https://github.com/mastereric/polymod --force --quiet
+          
+          echo "✅ All Haxe libraries installed."
 
-      - name: Download Mod Assets
+      - name: Download Mod Assets (Silent)
         run: |
-          pip install gdown mediafire-dl
+          pip install -q gdown mediafire-dl
           
           URL="${{ github.event.inputs.mod_url }}"
           
           if [[ $URL == *"drive.google.com"* ]]; then
-            gdown "$URL" -O mod.zip
+            gdown -q "$URL" -O mod.zip
           elif [[ $URL == *"mediafire.com"* ]]; then
-            mediafire-dl "$URL" -o mod.zip
+            mediafire-dl "$URL" -o mod.zip > /dev/null
           else
-            curl -L "$URL" -o mod.zip
+            curl -sL "$URL" -o mod.zip
           fi
+          echo "✅ Mod downloaded."
 
       - name: Extract Mod Zip
         run: |
-          unzip -o mod.zip -d .
-          # Check for assets folder to ensure zip structure is correct
-          if [ -d "assets" ]; then
-            echo "Assets directory verified."
-          else
-            echo "Warning: No assets folder found in root of zip."
-          fi
+          unzip -qq o mod.zip -d .
+          echo "✅ Assets extracted."
 
       - name: Compile to HTML5
         run: |
-          haxelib run lime clean html5
-          haxelib run lime build html5 -release
+          # The clean step is fast, but build will still show progress to avoid looking "stuck"
+          haxelib run lime clean html5 -quiet
+          haxelib run lime build html5 -release -quiet
 
-      - name: Convert to Single HTML File
+      - name: Convert to Single HTML File (Silent)
         run: |
-          npm install -g inline-assets
+          npm install -g inline-assets --silent
           cd export/release/html5/bin/
-          # This packs JS, WASM, and Assets into one HTML
-          inline-assets index.html single-file-mod.html
+          inline-assets index.html single-file-mod.html > /dev/null
+          echo "✅ Single-file HTML generated."
 
       - name: Upload Final Build
         uses: actions/upload-artifact@v4
