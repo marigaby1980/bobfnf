@@ -22,26 +22,30 @@ jobs:
       - name: Setup Haxe
         uses: krdlab/setup-haxe@v1
         with:
-          haxe-version: 4.2.5 # Stick to 4.2.5 for Psych Engine stability
+          haxe-version: 4.2.5
 
-      - name: Install Haxelibs (Individually)
+      - name: Install Haxelibs (Auto-Confirm)
         run: |
+          # Use 'yes' to pipe "Y" into any command that might ask for it
           haxelib setup ~/haxelib
-          # Install core one by one to avoid dependency conflicts
           haxelib install lime 8.0.1 --quiet
           haxelib install openfl 9.2.1 --quiet
           haxelib install flixel 5.2.2 --quiet
-          haxelib run lime setup
+          
+          # This is the line that usually freezes; we force-answer 'n' to the shortcuts
+          # because we don't need them on a virtual machine.
+          echo "n" | haxelib run lime setup
+          
           haxelib install flixel-addons 3.2.1 --quiet
           haxelib install flixel-ui --quiet
           haxelib install hscript --quiet
           haxelib install tjson --quiet
           haxelib install flxanimate --quiet
           
-          # Use the ZIP method for Lua to bypass the cloning errors seen in your logs
+          # Using the ZIP method for Lua to avoid Git credential prompts
           curl -sL https://github.com/nebulaz0r/linc_luajit/archive/refs/heads/master.zip -o lua.zip
           haxelib install lua.zip --quiet
-          echo "✅ Libraries finished."
+          echo "✅ Libraries installed without freezing."
 
       - name: Download & Inject Mod
         run: |
@@ -60,17 +64,15 @@ jobs:
       - name: Patch for Web Compatibility
         run: |
           cd engine-source
-          # Remove Discord from Project.xml but KEEP linc_luajit
-          sed -i '/discord-rpc/d' Project.xml || true
-          sed -i '/hxdiscord_rpc/d' Project.xml || true
-          
-          # Create Mocks to prevent desktop-only crashes
+          # [span_0](start_span)[span_1](start_span)Mocking classes from your base script[span_0](end_span)[span_1](end_span)
           mkdir -p source/hxdiscord_rpc
           echo "class FileSystem { public static function exists(p:String) return false; public static function readDirectory(p:String) return []; public static function absolutePath(p:String) return p; }" > source/FileSystem.hx
           echo "class Sys { public static function exit(c:Int) {} public static function sleep(t:Float) {} public static function args() return []; }" > source/Sys.hx
           echo "package hxdiscord_rpc; class Discord { public static function Initialize(a:String, b:Bool, c:Dynamic) {} public static function Shutdown() {} }" > source/hxdiscord_rpc/Discord.hx
-
-          # Force the engine to use our mock classes instead of system ones
+          
+          # Remove Discord references but keep Lua for combat mechanics
+          sed -i '/discord-rpc/d' Project.xml || true
+          sed -i '/hxdiscord_rpc/d' Project.xml || true
           find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g' -e 's/sys\.Sys/Sys/g' {} +
 
       - name: Build Web Target
@@ -81,7 +83,6 @@ jobs:
       - name: Standardize and Publish
         run: |
           cd engine-source/export/release/html5/bin
-          # Clean up the JS filename for the web branch
           MAIN_JS=$(ls *.js | grep -v 'howler' | head -n 1)
           mv "$MAIN_JS" funkin.js
           sed -i "s/$MAIN_JS/funkin.js/g" index.html
