@@ -24,28 +24,30 @@ jobs:
         with:
           haxe-version: 4.2.5
 
-      - name: Install Haxelibs (Auto-Confirm)
+      - name: Install Haxelibs (Force Non-Interactive)
         run: |
-          # Use 'yes' to pipe "Y" into any command that might ask for it
           haxelib setup ~/haxelib
+          
+          # 1. Update haxelib first to stop the version warnings
+          haxelib install haxelib --quiet
+          
+          # 2. Install core libraries one by one
           haxelib install lime 8.0.1 --quiet
           haxelib install openfl 9.2.1 --quiet
           haxelib install flixel 5.2.2 --quiet
           
-          # This is the line that usually freezes; we force-answer 'n' to the shortcuts
-          # because we don't need them on a virtual machine.
-          echo "n" | haxelib run lime setup
+          # 3. Skip 'lime setup' - it is not needed for the build and causes freezes
           
           haxelib install flixel-addons 3.2.1 --quiet
-          haxelib install flixel-ui --quiet
+          haxelib install flixel-ui 2.5.0 --quiet
           haxelib install hscript --quiet
           haxelib install tjson --quiet
           haxelib install flxanimate --quiet
           
-          # Using the ZIP method for Lua to avoid Git credential prompts
+          # 4. Install Lua via direct ZIP to bypass Git cloning issues
           curl -sL https://github.com/nebulaz0r/linc_luajit/archive/refs/heads/master.zip -o lua.zip
           haxelib install lua.zip --quiet
-          echo "✅ Libraries installed without freezing."
+          echo "✅ All libraries installed without prompts."
 
       - name: Download & Inject Mod
         run: |
@@ -58,19 +60,20 @@ jobs:
           fi
           mkdir -p mod_extract
           unzip -qq -o mod.zip -d mod_extract/
+          # [span_0](start_span)Inject mod into the engine source[span_0](end_span)
           cp -rn mod_extract/* engine-source/mods/ || true
           cp -rn mod_extract/* engine-source/assets/ || true
 
       - name: Patch for Web Compatibility
         run: |
           cd engine-source
-          # [span_0](start_span)[span_1](start_span)Mocking classes from your base script[span_0](end_span)[span_1](end_span)
+          # [span_1](start_span)[span_2](start_span)Create mock classes to prevent desktop-only crashes[span_1](end_span)[span_2](end_span)
           mkdir -p source/hxdiscord_rpc
           echo "class FileSystem { public static function exists(p:String) return false; public static function readDirectory(p:String) return []; public static function absolutePath(p:String) return p; }" > source/FileSystem.hx
           echo "class Sys { public static function exit(c:Int) {} public static function sleep(t:Float) {} public static function args() return []; }" > source/Sys.hx
           echo "package hxdiscord_rpc; class Discord { public static function Initialize(a:String, b:Bool, c:Dynamic) {} public static function Shutdown() {} }" > source/hxdiscord_rpc/Discord.hx
           
-          # Remove Discord references but keep Lua for combat mechanics
+          # [span_3](start_span)Remove Discord references but keep Lua for combat mechanics[span_3](end_span)
           sed -i '/discord-rpc/d' Project.xml || true
           sed -i '/hxdiscord_rpc/d' Project.xml || true
           find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g' -e 's/sys\.Sys/Sys/g' {} +
@@ -78,15 +81,18 @@ jobs:
       - name: Build Web Target
         run: |
           cd engine-source
+          # -[span_4](start_span)D DISCORD_DISABLE is mandatory for web stability[span_4](end_span)
           haxelib run lime build html5 -release -D DISCORD_DISABLE
 
       - name: Standardize and Publish
         run: |
           cd engine-source/export/release/html5/bin
+          # [span_5](start_span)Rename output for cleaner hosting[span_5](end_span)
           MAIN_JS=$(ls *.js | grep -v 'howler' | head -n 1)
           mv "$MAIN_JS" funkin.js
           sed -i "s/$MAIN_JS/funkin.js/g" index.html
           
+          # [span_6](start_span)[span_7](start_span)Push to web-build branch[span_6](end_span)[span_7](end_span)
           git init
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
