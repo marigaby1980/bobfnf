@@ -29,18 +29,18 @@ jobs:
 
       - name: Install Haxe Libraries
         run: |
-          haxelib setup ~/haxelib --silent
+          haxelib setup ~/haxelib
           # Core Framework
-          haxelib install lime 8.0.1 --silent
-          haxelib install openfl 9.2.1 --silent
-          haxelib install flixel 5.2.2 --silent
-          haxelib run lime setup --silent
+          haxelib install lime 8.0.1
+          haxelib install openfl 9.2.1
+          haxelib install flixel 5.2.2
+          haxelib run lime setup
           
           # UI and Scripting
-          haxelib install flixel-addons --silent
-          haxelib install flixel-ui --silent
-          haxelib install hscript --silent
-          haxelib install flxanimate --silent
+          haxelib install flixel-addons
+          haxelib install flixel-ui
+          haxelib install hscript
+          haxelib install flxanimate
           
           # Psych Engine Specifics (Using the most stable git links)
           haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit.git
