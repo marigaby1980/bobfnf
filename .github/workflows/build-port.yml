@@ -32,7 +32,7 @@ jobs:
         run: |
           haxelib setup ~/haxelib
           
-          # Core Framework - Using --quiet to suppress download progress
+          # Core Framework
           haxelib install lime 8.0.1 --quiet
           haxelib install openfl 9.2.1 --quiet
           haxelib install flixel 5.2.2 --quiet
@@ -44,11 +44,12 @@ jobs:
           haxelib install hscript --quiet
           haxelib install flxanimate --quiet
           
-          # Git Libraries - Using --quiet to suppress cloning details
-          haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit --force --quiet
-          haxelib git hxvlc https://github.com/MAJESTY-Development/hxvlc --force --quiet
-          haxelib git faxe https://github.com/uhyolive/faxe --force --quiet
-          haxelib git polymod https://github.com/mastereric/polymod --force --quiet
+          # FIX: Proper syntax for haxelib git (URL then optional branch then flag)
+          # We use 'master' or 'main' explicitly to prevent it from getting stuck
+          haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit master --force --quiet
+          haxelib git hxvlc https://github.com/MAJESTY-Development/hxvlc master --force --quiet
+          haxelib git faxe https://github.com/uhyolive/faxe master --force --quiet
+          haxelib git polymod https://github.com/mastereric/polymod master --force --quiet
           
           echo "✅ All Haxe libraries installed."
 
@@ -69,12 +70,11 @@ jobs:
 
       - name: Extract Mod Zip
         run: |
-          unzip -qq o mod.zip -d .
+          unzip -qq -o mod.zip -d .
           echo "✅ Assets extracted."
 
       - name: Compile to HTML5
         run: |
-          # The clean step is fast, but build will still show progress to avoid looking "stuck"
           haxelib run lime clean html5 -quiet
           haxelib run lime build html5 -release -quiet
 
