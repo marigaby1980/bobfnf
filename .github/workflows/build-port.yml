@@ -4,12 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       mod_url:
-        description: 'Direct URL to mod .zip'
+        description: 'Direct URL to your mod .zip file (Google Drive, Dropbox, MediaFire, Discord, etc.)'
         required: true
         type: string
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Clears the Node.js 20 warning
 
 jobs:
   build:
@@ -22,202 +19,106 @@ jobs:
         with:
           repository: 'ShadowMario/FNF-PsychEngine'
           path: 'engine-source'
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Prepare runner (tools)
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends unzip zip curl wget python3-pip || true
 
       - name: Download Mod Payload
-        shell: bash
         run: |
-          set -euo pipefail
-          IFS=$'\n\t'
+          echo "Downloading mod from URL provided..."
+          pip install gdown --quiet
+          
           URL="${{ github.event.inputs.mod_url }}"
-          if [ -z "$URL" ]; then
-            echo "No mod_url provided" >&2
-            exit 1
-          fi
-
-          pip3 install -q gdown || true
-
-          echo "Downloading from: $URL"
+          
           if [[ "$URL" == *"drive.google.com"* ]]; then
-            python3 -m gdown.cli "$URL" -O mod.zip || python3 -m gdown "$URL" -O mod.zip || (echo "gdown failed" && exit 1)
+            gdown "$URL" -O mod-payload.zip
           else
-            if command -v curl >/dev/null 2>&1; then
-              curl -sSL "$URL" -o mod.zip || true
-            fi
-            if [ ! -s mod.zip ]; then
-              if command -v wget >/dev/null 2>&1; then
-                wget -q "$URL" -O mod.zip || true
-              fi
-            fi
+            wget -q -O mod-payload.zip "$URL"
           fi
+          
+          echo "Extracting Mod Payload..."
+          mkdir -p mods_upload
+          unzip -q mod-payload.zip -d mods_upload/
+          rm mod-payload.zip
 
-          if [ ! -s mod.zip ]; then
-            echo "Warning: mod.zip not downloaded or empty — continuing without mod injection."
-            touch mod.zip
-          else
-            mkdir -p mod_extract
-            unzip -qq -o mod.zip -d mod_extract/ || (echo "unzip failed" && exit 1)
-            # Ensure target directories exist before copying
-            mkdir -p engine-source/mods engine-source/assets
-            cp -rn mod_extract/* engine-source/mods/ || true
-            cp -rn mod_extract/* engine-source/assets/ || true
-            echo "✅ Mod assets injected."
-          fi
+      - name: Inject Mods into Engine
+        run: |
+          cd engine-source
+          mkdir -p mods
+          # Inject the uploaded mod files into the target directories
+          cp -rn ../mods_upload/* mods/ || true
+          cp -rn ../mods_upload/* assets/ || true
 
       - name: Setup Haxe
-        uses: krdlab/setup-haxe@v1
+        uses: krdlab/setup-haxe@master
         with:
           haxe-version: 4.2.5
 
-      - name: Install Haxelibs (resilient)
-        shell: bash
+      - name: Install Haxelibs and Dependencies
         run: |
-          set -euo pipefail
-          IFS=$'\n\t'
-          # Ensure haxelib is initialized
-          haxelib setup ~/haxelib || true
-          # Install common libraries — ignore already-installed errors
-          for lib in lime:8.0.1 openfl:9.2.1 flixel:5.2.2 flixel-addons:3.2.1 flixel-ui:2.5.0 hscript tjson flxanimate; do
-            name="${lib%%:*}"
-            ver="${lib##*:}"
-            if [ "$name" = "$ver" ]; then
-              # no version specified
-              haxelib install "$name" || true
-            else
-              # try exact version where supported
-              haxelib install "$name" "$ver" || haxelib install "$name" || true
-            fi
-          done
-
-          echo "Installing linc_luajit via git clone (if needed)..."
-          haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit master || true
-          echo "✅ Libraries finished."
-
-      - name: Patch for Web Compatibility
-        shell: bash
-        run: |
-          set -euo pipefail
-          IFS=$'\n\t'
           cd engine-source
+          haxelib setup ~/haxelib
+          haxelib install hmm --quiet
+          haxelib run hmm install --quiet
+          haxelib install lime
+          haxelib install openfl
+          haxelib install flixel
 
-          # Create compatibility mocks (safe, idempotent)
+      - name: Patch HTML5 incompatible code (Mock Sys)
+        run: |
+          cd engine-source
+          echo 'class FileSystem { public static function absolutePath(path:String) return path; public static function exists(path:String) return false; public static function readDirectory(path:String):Array<String> return []; public static function isDirectory(path:String) return false; public static function stat(path:String) return null; public static function fullPath(path:String) return path; public static function createDirectory(path:String) {} public static function deleteFile(path:String) {} public static function deleteDirectory(path:String) {} }' > source/FileSystem.hx
+          echo 'class File { public static function getContent(path:String) return ""; public static function getBytes(path:String) return null; public static function saveContent(path:String, c:String) return; public static function saveBytes(path:String, b:Dynamic) return; public static function copy(s:String, d:String) {} }' > source/File.hx
+          echo 'class Sys { public static function exit(code:Int) {} public static function sleep(t:Float) {} public static function command(c:String, ?a:Array<String>) return 0; public static function args():Array<String> return []; public static function getCwd() return ""; public static function setCwd(s:String) {} public static function print(v:Dynamic) {} public static function println(v:Dynamic) {} public static function environment() return new haxe.ds.StringMap<String>(); public static function getEnv(s:String) return ""; public static function programPath() return ""; }' > source/Sys.hx
+          echo 'class Process { public var stdout:Dynamic; public var stderr:Dynamic; public function new(c:String, ?a:Dynamic) { stdout = { readAll: function() return { toString: function() return "" }, readLine: function() return "" }; stderr = stdout; } public function exitCode(b:Bool=true) return 0; public function close() {} }' > source/Process.hx
+          echo 'class Thread { public static function create(f:Void->Void) { f(); } public static function readMessage(b:Bool) return null; public static function sendMessage(m:Dynamic) {} }' > source/Thread.hx
+          echo 'class Mutex { public function new() {} public function acquire() {} public function release() {} }' > source/Mutex.hx
+          
+          sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
           mkdir -p source/hxdiscord_rpc
-          mkdir -p source
+          echo 'package hxdiscord_rpc; class Discord { public static function Initialize(a:String,b:Bool,c:Dynamic){} public static function Shutdown(){} public static function RunCallbacks(){} public static function UpdatePresence(a:Dynamic){} public static function ClearPresence(){} }' > source/hxdiscord_rpc/Discord.hx
+          echo 'package hxdiscord_rpc; class Types { public static inline var DISCORD_REPLY_NO=0; public static inline var DISCORD_REPLY_YES=1; public static inline var DISCORD_REPLY_IGNORE=2; }' > source/hxdiscord_rpc/Types.hx
+          echo 'package hxdiscord_rpc; typedef DiscordPresence = Dynamic;' > source/hxdiscord_rpc/DiscordPresence.hx
 
-          cat > source/FileSystem.hx <<'EOF'
-class FileSystem {
-  public static function exists(p:String):Bool { return false; }
-  public static function readDirectory(p:String):Array<String> { return []; }
-  public static function absolutePath(p:String):String { return p; }
-}
-EOF
+          find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g'                                                           -e 's/sys\.io\.File/File/g'                                                           -e 's/sys\.io\.Process/Process/g'                                                           -e 's/sys\.thread\.Thread/Thread/g'                                                           -e 's/sys\.thread\.Mutex/Mutex/g'                                                           -e '/import cpp/d'                                                           -e 's/cpp\.[a-zA-Z0-9_]+/Dynamic/g'                                                           -e '/import llua/d'                                                           -e 's/llua\.[a-zA-Z0-9_]+/Dynamic/g' {} +
+          find . -name "FlxSoundTray.hx" -type f -exec sed -i 's/public function new(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\n&/g' {} +
 
-          cat > source/Sys.hx <<'EOF'
-class Sys {
-  public static function exit(c:Int):Void {}
-  public static function sleep(t:Float):Void {}
-  public static function args():Array<String> { return []; }
-}
-EOF
-
-          cat > source/hxdiscord_rpc/Discord.hx <<'EOF'
-package hxdiscord_rpc;
-class Discord {
-  public static function Initialize(a:String, b:Bool, c:Dynamic):Void {}
-  public static function Shutdown():Void {}
-}
-EOF
-
-          # If Project.xml exists, remove known discord references (non-fatal)
-          if [ -f Project.xml ]; then
-            # Remove lines referencing discord-rpc or hxdiscord_rpc
-            # Use perl in-place to avoid sed differences across platforms
-            perl -i -ne 'print unless /discord-rpc/ or /hxdiscord_rpc/' Project.xml || true
-          fi
-
-          # Replace common problematic references in source files (idempotent)
-          find source -name "*.hx" -type f -print0 | xargs -0 -n1 perl -0777 -pe 's/\bsys\.FileSystem\b/FileSystem/g; s/\bsys\.Sys\b/Sys/g' -i || true
-
-          echo "✅ Patch applied."
-
-      - name: Build Web Target
-        shell: bash
+      - name: Optimization & Web Compile Build
         run: |
-          set -euo pipefail
-          IFS=$'\n\t'
           cd engine-source
+          # Adds flags to make HTML5 compile lightweight as requested
+          haxelib run lime build html5 -release -D DISCORD_DISABLE -D NO_PRELOAD_ALL
 
-          # Try building with lime; include DISCORD_DISABLE define to skip RPC code
-          if command -v haxelib >/dev/null 2>&1; then
-            echo "Running: haxelib run lime build html5 -release -D DISCORD_DISABLE"
-            haxelib run lime build html5 -release -D DISCORD_DISABLE || (echo "Build failed" && exit 1)
-          else
-            echo "haxelib not found in PATH" >&2
-            exit 1
-          fi
-
-      - name: Standardize and Prepare Web Output
-        shell: bash
+      - name: Package Flat ZIP & Standardize output
         run: |
-          set -euo pipefail
-          IFS=$'\n\t'
-          cd engine-source/export/release/html5/bin || (echo "Build output not found" && exit 1)
-
-          # Find a primary JS file (ignore howler) robustly
-          shopt -s nullglob
-          js_files=( *.js )
-          MAIN_JS=""
-          for f in "${js_files[@]}"; do
-            if [[ "$f" != *howler* ]]; then
-              MAIN_JS="$f"
-              break
+          cd engine-source/export/release/html5/bin
+          
+          # Rename main engine JS file to funkin.js for easier jsDelivr/CDN embedding
+          MAIN_JS=$(ls *.js | grep -E -v 'howler|pako' | head -n 1)
+          if [ -n "$MAIN_JS" ] && [ "$MAIN_JS" != "funkin.js" ]; then
+            mv "$MAIN_JS" funkin.js
+            # Update index.html to use the new JS filename
+            if [ -f "index.html" ]; then
+              sed -i "s/$MAIN_JS/funkin.js/g" index.html
             fi
-          done
-
-          if [ -z "$MAIN_JS" ]; then
-            echo "No main JS found — listing files:" >&2
-            ls -la
-            exit 1
           fi
-
-          echo "Main JS detected: $MAIN_JS"
-          mv -f -- "$MAIN_JS" funkin.js
-          # Replace references to the original filename with funkin.js safely
-          perl -pi -e "s/\Q$MAIN_JS\E/funkin.js/g" index.html || true
-
-          # Initialize a fresh git repo for the export and push to web-build branch
-          git init -q
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
-          # Commit only if there are changes
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Web Build $(date -u +"%Y-%m-%d %H:%M:%SZ")"
-            # Force push using token to the repository that triggered this workflow
-            git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build || (echo "Push failed" && exit 1)
+          
+          # Ensure index.html exists fallback
+          if [ ! -f "index.html" ]; then
+            echo "<!DOCTYPE html><html><body><h1>FNF Web Build</h1><script src='funkin.js'></script></body></html>" > index.html
           fi
+          
+          zip -r ../../../../../web_export.zip *
 
-      - name: Package Web Build as Zip Artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          IFS=$'\n\t'
-          cd engine-source/export/release/html5 || (echo "Export folder not found" && exit 1)
-          # Create a zip of the release/html5 contents for upload
-          ZIP_NAME=Standalone-Web-Mod.zip
-          rm -f "$ZIP_NAME"
-          zip -r -q "$ZIP_NAME" ./bin || (echo "Zip creation failed" && exit 1)
-          echo "Created $ZIP_NAME"
-
-      - name: Upload Artifact
+      - name: Upload Web Export
         uses: actions/upload-artifact@v4
         with:
-          name: Standalone-Web-Mod
-          path: engine-source/export/release/html5/Standalone-Web-Mod.zip
+          name: web-export
+          path: web_export.zip
+
+      - name: Auto-Publish to GitHub Branch
+        run: |
+          cd engine-source/export/release/html5/bin
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Automated Web Port Build"
+          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build
