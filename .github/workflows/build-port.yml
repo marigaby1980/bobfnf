@@ -58,17 +58,8 @@ jobs:
           haxelib install tjson --quiet
           haxelib install flxanimate --quiet
           
-          echo "Installing linc_luajit via Direct Download..."
-          # We use a more reliable public proxy for the zip if the primary fails
-          curl -sSL "https://github.com/nebulaz0r/linc_luajit/archive/refs/heads/master.zip" -o linc_luajit.zip
-          
-          # Check if the file exists and has size > 0 before installing
-          if [ -s linc_luajit.zip ]; then
-            haxelib install linc_luajit.zip --quiet
-          else
-            echo "Direct download failed, attempting git clone as last resort..."
-            haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit master --quiet
-          fi
+          echo "Installing linc_luajit via git clone..."
+          haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit master --quiet
           echo "✅ Libraries finished."
 
       - name: Patch for Web Compatibility
