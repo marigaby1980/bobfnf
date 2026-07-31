@@ -113,7 +113,6 @@ jobs:
             public static function getBytes(path:String) return null;
             public static function saveContent(path:String, c:String) {}
           }
-EOF
 
           cat > source/Sys.hx <<'EOF'
           class Sys {
@@ -121,7 +120,6 @@ EOF
             public static function sleep(t:Float) {}
             public static function command(c:String, ?a:Array<String>) return 0;
           }
-EOF
 
           cat > source/Process.hx <<'EOF'
           class Process {
@@ -132,7 +130,6 @@ EOF
               stderr = stdout;
             }
           }
-EOF
 
           cat > source/Mutex.hx <<'EOF'
           class Mutex {
@@ -140,7 +137,6 @@ EOF
             public function acquire() {}
             public function release() {}
           }
-EOF
 
           # Remove known optional dependencies that commonly break HTML5 builds
           sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
@@ -154,11 +150,10 @@ EOF
             public static function Shutdown() {}
             public static function RunCallbacks() {}
           }
-EOF
           cat > source/hxdiscord_rpc/DiscordPresence.hx <<'EOF'
           package hxdiscord_rpc;
           typedef DiscordPresence = Dynamic;
-EOF
+          
           cat > source/hxdiscord_rpc/Types.hx <<'EOF'
           package hxdiscord_rpc;
           class Types {
@@ -166,7 +161,6 @@ EOF
             public static inline var DISCORD_REPLY_YES = 1;
             public static inline var DISCORD_REPLY_IGNORE = 2;
           }
-EOF
 
           # Replace some problematic sys class usages (safe, limited scope)
           # NOTE: these sed rules are conservative; adjust if you know more specific replacements are needed.
@@ -202,7 +196,7 @@ EOF
             <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
             <body><h1>FNF Web Build</h1><script src="funkin.js"></script></body>
           </html>
-EOF
+          
           fi
 
           # Zip the produced artifacts
