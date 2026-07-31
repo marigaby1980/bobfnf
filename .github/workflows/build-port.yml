@@ -106,7 +106,6 @@ jobs:
             public static function exists(path:String) return false;
             public static function readDirectory(path:String) return [];
           }
-EOF
 
           cat > source/File.hx <<'EOF'
           class File {
