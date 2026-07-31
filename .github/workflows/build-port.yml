@@ -1,4 +1,5 @@
 name: Build FNF Web Port
+
 on:
   workflow_dispatch:
     inputs:
@@ -21,88 +22,202 @@ jobs:
         with:
           repository: 'ShadowMario/FNF-PsychEngine'
           path: 'engine-source'
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 1. DOWNLOAD MOD FIRST
-      - name: Download Mod Payload
+      - name: Prepare runner (tools)
         run: |
-          pip install -q gdown
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends unzip zip curl wget python3-pip || true
+
+      - name: Download Mod Payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
           URL="${{ github.event.inputs.mod_url }}"
-          if [[ "$URL" == *"drive.google.com"* ]]; then
-            gdown -q "$URL" -O mod.zip
-          else
-            curl -sSL "$URL" -o mod.zip || wget -q "$URL" -O mod.zip
+          if [ -z "$URL" ]; then
+            echo "No mod_url provided" >&2
+            exit 1
           fi
-          
-          mkdir -p mod_extract
-          unzip -qq -o mod.zip -d mod_extract/
-          cp -rn mod_extract/* engine-source/mods/ || true
-          cp -rn mod_extract/* engine-source/assets/ || true
-          echo "✅ Mod assets injected."
+
+          pip3 install -q gdown || true
+
+          echo "Downloading from: $URL"
+          if [[ "$URL" == *"drive.google.com"* ]]; then
+            python3 -m gdown.cli "$URL" -O mod.zip || python3 -m gdown "$URL" -O mod.zip || (echo "gdown failed" && exit 1)
+          else
+            if command -v curl >/dev/null 2>&1; then
+              curl -sSL "$URL" -o mod.zip || true
+            fi
+            if [ ! -s mod.zip ]; then
+              if command -v wget >/dev/null 2>&1; then
+                wget -q "$URL" -O mod.zip || true
+              fi
+            fi
+          fi
+
+          if [ ! -s mod.zip ]; then
+            echo "Warning: mod.zip not downloaded or empty — continuing without mod injection."
+            touch mod.zip
+          else
+            mkdir -p mod_extract
+            unzip -qq -o mod.zip -d mod_extract/ || (echo "unzip failed" && exit 1)
+            # Ensure target directories exist before copying
+            mkdir -p engine-source/mods engine-source/assets
+            cp -rn mod_extract/* engine-source/mods/ || true
+            cp -rn mod_extract/* engine-source/assets/ || true
+            echo "✅ Mod assets injected."
+          fi
 
       - name: Setup Haxe
         uses: krdlab/setup-haxe@v1
         with:
           haxe-version: 4.2.5
 
-      # 2. INSTALL LIBRARIES WITH LOCAL-FIRST INSTALLATION
-      - name: Install Haxelibs (Resilient Method)
+      - name: Install Haxelibs (resilient)
+        shell: bash
         run: |
-          haxelib setup ~/haxelib
-          haxelib install haxelib --quiet
-          haxelib install lime 8.0.1 --quiet
-          haxelib install openfl 9.2.1 --quiet
-          haxelib install flixel 5.2.2 --quiet
-          haxelib install flixel-addons 3.2.1 --quiet
-          haxelib install flixel-ui 2.5.0 --quiet
-          haxelib install hscript --quiet
-          haxelib install tjson --quiet
-          haxelib install flxanimate --quiet
-          
-          echo "Installing linc_luajit via git clone..."
-          haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit master --quiet
+          set -euo pipefail
+          IFS=$'\n\t'
+          # Ensure haxelib is initialized
+          haxelib setup ~/haxelib || true
+          # Install common libraries — ignore already-installed errors
+          for lib in lime:8.0.1 openfl:9.2.1 flixel:5.2.2 flixel-addons:3.2.1 flixel-ui:2.5.0 hscript tjson flxanimate; do
+            name="${lib%%:*}"
+            ver="${lib##*:}"
+            if [ "$name" = "$ver" ]; then
+              # no version specified
+              haxelib install "$name" || true
+            else
+              # try exact version where supported
+              haxelib install "$name" "$ver" || haxelib install "$name" || true
+            fi
+          done
+
+          echo "Installing linc_luajit via git clone (if needed)..."
+          haxelib git linc_luajit https://github.com/nebulaz0r/linc_luajit master || true
           echo "✅ Libraries finished."
 
       - name: Patch for Web Compatibility
+        shell: bash
         run: |
+          set -euo pipefail
+          IFS=$'\n\t'
           cd engine-source
+
+          # Create compatibility mocks (safe, idempotent)
           mkdir -p source/hxdiscord_rpc
-          # Compatibility Mocks
-          echo "class FileSystem { public static function exists(p:String) return false; public static function readDirectory(p:String) return []; public static function absolutePath(p:String) return p; }" > source/FileSystem.hx
-          echo "class Sys { public static function exit(c:Int) {} public static function sleep(t:Float) {} public static function args() return []; }" > source/Sys.hx
-          echo "package hxdiscord_rpc; class Discord { public static function Initialize(a:String, b:Bool, c:Dynamic) {} public static function Shutdown() {} }" > source/hxdiscord_rpc/Discord.hx
-          
-          # Remove Discord references
-          sed -i '/discord-rpc/d' Project.xml || true
-          sed -i '/hxdiscord_rpc/d' Project.xml || true
-          find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g' -e 's/sys\.Sys/Sys/g' {} +
+          mkdir -p source
+
+          cat > source/FileSystem.hx <<'EOF'
+class FileSystem {
+  public static function exists(p:String):Bool { return false; }
+  public static function readDirectory(p:String):Array<String> { return []; }
+  public static function absolutePath(p:String):String { return p; }
+}
+EOF
+
+          cat > source/Sys.hx <<'EOF'
+class Sys {
+  public static function exit(c:Int):Void {}
+  public static function sleep(t:Float):Void {}
+  public static function args():Array<String> { return []; }
+}
+EOF
+
+          cat > source/hxdiscord_rpc/Discord.hx <<'EOF'
+package hxdiscord_rpc;
+class Discord {
+  public static function Initialize(a:String, b:Bool, c:Dynamic):Void {}
+  public static function Shutdown():Void {}
+}
+EOF
+
+          # If Project.xml exists, remove known discord references (non-fatal)
+          if [ -f Project.xml ]; then
+            # Remove lines referencing discord-rpc or hxdiscord_rpc
+            # Use perl in-place to avoid sed differences across platforms
+            perl -i -ne 'print unless /discord-rpc/ or /hxdiscord_rpc/' Project.xml || true
+          fi
+
+          # Replace common problematic references in source files (idempotent)
+          find source -name "*.hx" -type f -print0 | xargs -0 -n1 perl -0777 -pe 's/\bsys\.FileSystem\b/FileSystem/g; s/\bsys\.Sys\b/Sys/g' -i || true
+
+          echo "✅ Patch applied."
 
       - name: Build Web Target
+        shell: bash
         run: |
+          set -euo pipefail
+          IFS=$'\n\t'
           cd engine-source
-          # Use -D DISCORD_DISABLE to ensure the compiler skips the broken RPC code
-          haxelib run lime build html5 -release -D DISCORD_DISABLE
 
-      - name: Standardize and Publish
+          # Try building with lime; include DISCORD_DISABLE define to skip RPC code
+          if command -v haxelib >/dev/null 2>&1; then
+            echo "Running: haxelib run lime build html5 -release -D DISCORD_DISABLE"
+            haxelib run lime build html5 -release -D DISCORD_DISABLE || (echo "Build failed" && exit 1)
+          else
+            echo "haxelib not found in PATH" >&2
+            exit 1
+          fi
+
+      - name: Standardize and Prepare Web Output
+        shell: bash
         run: |
-          cd engine-source/export/release/html5/bin
-          MAIN_JS=$(ls *.js | grep -v 'howler' | head -n 1)
-          mv "$MAIN_JS" funkin.js
-          sed -i "s/$MAIN_JS/funkin.js/g" index.html
-          git init
+          set -euo pipefail
+          IFS=$'\n\t'
+          cd engine-source/export/release/html5/bin || (echo "Build output not found" && exit 1)
+
+          # Find a primary JS file (ignore howler) robustly
+          shopt -s nullglob
+          js_files=( *.js )
+          MAIN_JS=""
+          for f in "${js_files[@]}"; do
+            if [[ "$f" != *howler* ]]; then
+              MAIN_JS="$f"
+              break
+            fi
+          done
+
+          if [ -z "$MAIN_JS" ]; then
+            echo "No main JS found — listing files:" >&2
+            ls -la
+            exit 1
+          fi
+
+          echo "Main JS detected: $MAIN_JS"
+          mv -f -- "$MAIN_JS" funkin.js
+          # Replace references to the original filename with funkin.js safely
+          perl -pi -e "s/\Q$MAIN_JS\E/funkin.js/g" index.html || true
+
+          # Initialize a fresh git repo for the export and push to web-build branch
+          git init -q
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Web Build $(date)"
-          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build
+          # Commit only if there are changes
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Web Build $(date -u +"%Y-%m-%d %H:%M:%SZ")"
+            # Force push using token to the repository that triggered this workflow
+            git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build || (echo "Push failed" && exit 1)
+          fi
 
-      - name: Generate Standalone Artifact
+      - name: Package Web Build as Zip Artifact
+        shell: bash
         run: |
-          npm install -g inline-assets --silent
-          cd engine-source/export/release/html5/bin
-          inline-assets index.html ../../../../index.html > /dev/null
+          set -euo pipefail
+          IFS=$'\n\t'
+          cd engine-source/export/release/html5 || (echo "Export folder not found" && exit 1)
+          # Create a zip of the release/html5 contents for upload
+          ZIP_NAME=Standalone-Web-Mod.zip
+          rm -f "$ZIP_NAME"
+          zip -r -q "$ZIP_NAME" ./bin || (echo "Zip creation failed" && exit 1)
+          echo "Created $ZIP_NAME"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Standalone-Web-Mod
-          path: index.html
+          path: engine-source/export/release/html5/Standalone-Web-Mod.zip
