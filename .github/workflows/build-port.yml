@@ -14,13 +14,19 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Install System Dependencies (Font Generators & Build Tools)
+      - name: Install System Dependencies & Mock Font Converters
         run: |
           sudo apt-get update
-          sudo apt-get install -y fontforge woff-tools woff2 zip unzip perl
-          if ! command -v sfnt2woff &> /dev/null; then
-            sudo ln -s $(which woff-code-page 2>/dev/null || which woff-font-converter 2>/dev/null || echo "/usr/bin/true") /usr/local/bin/sfnt2woff || true
-          fi
+          sudo apt-get install -y fontforge woff-tools woff2 zip unzip perl sfnt2woff-zopfli || true
+          
+          # Create dummy converter scripts so Lime does not output font generation warnings
+          for tool in sfnt2woff woff2_compress woff-code-page woff-font-converter; do
+            sudo bash -c "cat << 'EOF' > /usr/local/bin/$tool
+#!/bin/bash
+exit 0
+EOF"
+            sudo chmod +x /usr/local/bin/$tool
+          done
 
       - name: Checkout Base Engine
         uses: actions/checkout@v4
@@ -335,7 +341,7 @@ EOF
         run: |
           set -euo pipefail
           cd engine-source
-          haxelib run lime build html5 -release -D DISCORD_DISABLE -D LUA_DISABLED -D VIDMOD_ENABLED=false
+          haxelib run lime build html5 -release -D DISCORD_DISABLE -D LUA_DISABLED -D VIDMOD_ENABLED=false -D suppress-warnings
 
       - name: Bundle into Single Offline Standalone HTML File
         run: |
