@@ -72,59 +72,59 @@ jobs:
             echo "Patching Haxe Stdlib sys.thread target guard at $HAXE_STD_DIR/sys/thread..."
             
             cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/Thread.hx"
-package sys.thread;
-class Thread {
-    public static function create(f:Void->Void):Void { f(); }
-    public static function readMessage(block:Bool):Dynamic return null;
-    public static function sendMessage(msg:Dynamic):Void {}
-    public static function current():Thread return new Thread();
-}
-EOF
+            package sys.thread;
+            class Thread {
+                public static function create(f:Void->Void):Void { f(); }
+                public static function readMessage(block:Bool):Dynamic return null;
+                public static function sendMessage(msg:Dynamic):Void {}
+                public static function current():Thread return new Thread();
+            }
+            EOF
 
             cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/FixedThreadPool.hx"
-package sys.thread;
-class FixedThreadPool {
-    public var tasksCount(default, null):Int = 0;
-    public function new(numThreads:Int) {}
-    public function run(task:Void->Void):Void {
-        tasksCount++;
-        try { task(); } catch(e:Dynamic) {}
-        tasksCount--;
-    }
-    public function shutdown():Void {}
-}
-EOF
+            package sys.thread;
+            class FixedThreadPool {
+                public var tasksCount(default, null):Int = 0;
+                public function new(numThreads:Int) {}
+                public function run(task:Void->Void):Void {
+                    tasksCount++;
+                    try { task(); } catch(e:Dynamic) {}
+                    tasksCount--;
+                }
+                public function shutdown():Void {}
+            }
+            EOF
 
             cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/ElasticThreadPool.hx"
-package sys.thread;
-class ElasticThreadPool {
-    public function new(maxThreads:Int, timeoutSeconds:Float) {}
-    public function run(task:Void->Void):Void {
-        try { task(); } catch(e:Dynamic) {}
-    }
-    public function shutdown():Void {}
-}
-EOF
+            package sys.thread;
+            class ElasticThreadPool {
+                public function new(maxThreads:Int, timeoutSeconds:Float) {}
+                public function run(task:Void->Void):Void {
+                    try { task(); } catch(e:Dynamic) {}
+                }
+                public function shutdown():Void {}
+            }
+            EOF
 
             cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/Mutex.hx"
-package sys.thread;
-class Mutex {
-    public function new() {}
-    public function acquire():Void {}
-    public function release():Void {}
-}
-EOF
+            package sys.thread;
+            class Mutex {
+                public function new() {}
+                public function acquire():Void {}
+                public function release():Void {}
+            }
+            EOF
 
             cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/Deque.hx"
-package sys.thread;
-class Deque<T> {
-    var q:Array<T> = [];
-    public function new() {}
-    public function add(i:T):Void { q.push(i); }
-    public function push(i:T):Void { q.unshift(i); }
-    public function pop(block:Bool):T return q.shift();
-}
-EOF
+            package sys.thread;
+            class Deque<T> {
+                var q:Array<T> = [];
+                public function new() {}
+                public function add(i:T):Void { q.push(i); }
+                public function push(i:T):Void { q.unshift(i); }
+                public function pop(block:Bool):T return q.shift();
+            }
+            EOF
           fi
 
       - name: Install Haxelibs and Dependencies
@@ -188,130 +188,130 @@ EOF
           
           # 1. Top-Level ThreadPool Stubs for JS target
           cat << 'EOF' > source/FixedThreadPool.hx
-class FixedThreadPool {
-    public var tasksCount(default, null):Int = 0;
-    public function new(numThreads:Int) {}
-    public function run(task:Void->Void):Void {
-        tasksCount++;
-        try { task(); } catch(e:Dynamic) {}
-        tasksCount--;
-    }
-    public function shutdown():Void {}
-}
-EOF
+          class FixedThreadPool {
+              public var tasksCount(default, null):Int = 0;
+              public function new(numThreads:Int) {}
+              public function run(task:Void->Void):Void {
+                  tasksCount++;
+                  try { task(); } catch(e:Dynamic) {}
+                  tasksCount--;
+              }
+              public function shutdown():Void {}
+          }
+          EOF
 
           cat << 'EOF' > source/ElasticThreadPool.hx
-class ElasticThreadPool {
-    public function new(maxThreads:Int, timeoutSeconds:Float) {}
-    public function run(task:Void->Void):Void {
-        try { task(); } catch(e:Dynamic) {}
-    }
-    public function shutdown():Void {}
-}
-EOF
+          class ElasticThreadPool {
+              public function new(maxThreads:Int, timeoutSeconds:Float) {}
+              public function run(task:Void->Void):Void {
+                  try { task(); } catch(e:Dynamic) {}
+              }
+              public function shutdown():Void {}
+          }
+          EOF
 
           cat << 'EOF' > source/Thread.hx
-class Thread {
-    public static function create(f:Void->Void):Void { f(); }
-    public static function readMessage(block:Bool):Dynamic return null;
-    public static function sendMessage(msg:Dynamic):Void {}
-    public static function current():Thread return new Thread();
-}
-EOF
+          class Thread {
+              public static function create(f:Void->Void):Void { f(); }
+              public static function readMessage(block:Bool):Dynamic return null;
+              public static function sendMessage(msg:Dynamic):Void {}
+              public static function current():Thread return new Thread();
+          }
+          EOF
 
           cat << 'EOF' > source/Mutex.hx
-class Mutex {
-    public function new() {}
-    public function acquire():Void {}
-    public function release():Void {}
-}
-EOF
+          class Mutex {
+              public function new() {}
+              public function acquire():Void {}
+              public function release():Void {}
+          }
+          EOF
 
           cat << 'EOF' > source/Deque.hx
-class Deque<T> {
-    var q:Array<T> = [];
-    public function new() {}
-    public function add(i:T):Void { q.push(i); }
-    public function push(i:T):Void { q.unshift(i); }
-    public function pop(block:Bool):T return q.shift();
-}
-EOF
+          class Deque<T> {
+              var q:Array<T> = [];
+              public function new() {}
+              public function add(i:T):Void { q.push(i); }
+              public function push(i:T):Void { q.unshift(i); }
+              public function pop(block:Bool):T return q.shift();
+          }
+          EOF
 
           cat << 'EOF' > source/Sys.hx
-class Sys {
-    public static function exit(code:Int):Void {}
-    public static function sleep(t:Float):Void {}
-    public static function command(cmd:String, ?args:Array<String>):Int return 0;
-    public static function args():Array<String> return [];
-    public static function getCwd():String return "";
-    public static function setCwd(s:String):Void {}
-    public static function print(v:Dynamic):Void {}
-    public static function println(v:Dynamic):Void {}
-    public static function environment():Map<String,String> return new Map<String,String>();
-    public static function getEnv(s:String):String return "";
-    public static function programPath():String return "";
-    public static function systemName():String return "HTML5";
-    public static function time():Float return Date.now().getTime() / 1000;
-}
-EOF
+          class Sys {
+              public static function exit(code:Int):Void {}
+              public static function sleep(t:Float):Void {}
+              public static function command(cmd:String, ?args:Array<String>):Int return 0;
+              public static function args():Array<String> return [];
+              public static function getCwd():String return "";
+              public static function setCwd(s:String):Void {}
+              public static function print(v:Dynamic):Void {}
+              public static function println(v:Dynamic):Void {}
+              public static function environment():Map<String,String> return new Map<String,String>();
+              public static function getEnv(s:String):String return "";
+              public static function programPath():String return "";
+              public static function systemName():String return "HTML5";
+              public static function time():Float return Date.now().getTime() / 1000;
+          }
+          EOF
 
           # 2. Mock Discord RPC Types & Stubs
           cat << 'EOF' > source/DiscordRichPresence.hx
-typedef DiscordRichPresence = Dynamic;
-EOF
+          typedef DiscordRichPresence = Dynamic;
+          EOF
 
           cat << 'EOF' > source/hxdiscord_rpc/DiscordRichPresence.hx
-package hxdiscord_rpc;
-typedef DiscordRichPresence = Dynamic;
-EOF
+          package hxdiscord_rpc;
+          typedef DiscordRichPresence = Dynamic;
+          EOF
 
           cat << 'EOF' > source/hxdiscord_rpc/DiscordPresence.hx
-package hxdiscord_rpc;
-typedef DiscordPresence = Dynamic;
-EOF
+          package hxdiscord_rpc;
+          typedef DiscordPresence = Dynamic;
+          EOF
 
           cat << 'EOF' > source/hxdiscord_rpc/Discord.hx
-package hxdiscord_rpc;
-typedef DiscordRichPresence = Dynamic;
-typedef DiscordPresence = Dynamic;
-class Discord {
-    public static function Initialize(a:String, b:Bool, c:Dynamic):Void {}
-    public static function Shutdown():Void {}
-    public static function RunCallbacks():Void {}
-    public static function UpdatePresence(a:Dynamic):Void {}
-    public static function ClearPresence():Void {}
-}
-EOF
+          package hxdiscord_rpc;
+          typedef DiscordRichPresence = Dynamic;
+          typedef DiscordPresence = Dynamic;
+          class Discord {
+              public static function Initialize(a:String, b:Bool, c:Dynamic):Void {}
+              public static function Shutdown():Void {}
+              public static function RunCallbacks():Void {}
+              public static function UpdatePresence(a:Dynamic):Void {}
+              public static function ClearPresence():Void {}
+          }
+          EOF
 
           cat << 'EOF' > source/hxdiscord_rpc/Types.hx
-package hxdiscord_rpc;
-typedef DiscordRichPresence = Dynamic;
-typedef DiscordPresence = Dynamic;
-class Types {
-    public static inline var DISCORD_REPLY_NO = 0;
-    public static inline var DISCORD_REPLY_YES = 1;
-    public static inline var DISCORD_REPLY_IGNORE = 2;
-}
-EOF
+          package hxdiscord_rpc;
+          typedef DiscordRichPresence = Dynamic;
+          typedef DiscordPresence = Dynamic;
+          class Types {
+              public static inline var DISCORD_REPLY_NO = 0;
+              public static inline var DISCORD_REPLY_YES = 1;
+              public static inline var DISCORD_REPLY_IGNORE = 2;
+          }
+          EOF
 
           cat << 'EOF' > source/backend/Discord.hx
-package backend;
+          package backend;
 
-typedef DiscordRichPresence = Dynamic;
+          typedef DiscordRichPresence = Dynamic;
 
-class DiscordClient {
-    public static var isInitialized:Bool = false;
-    public function new() {}
-    public static function check():Void {}
-    public static function prepare():Void {}
-    public static function changePresence(details:String = "", ?state:String, ?smallImageKey:String, ?hasStartTimestamp:Bool, ?endTimestamp:Float):Void {}
-    public static function resetClientID():Void {}
-    public static function initialize():Void {}
-    public static function shutdown():Void {}
-    public static function addLuaCallbacks(lua:Dynamic):Void {}
-    public static function loadDiscordRPC():Void {}
-}
-EOF
+          class DiscordClient {
+              public static var isInitialized:Bool = false;
+              public function new() {}
+              public static function check():Void {}
+              public static function prepare():Void {}
+              public static function changePresence(details:String = "", ?state:String, ?smallImageKey:String, ?hasStartTimestamp:Bool, ?endTimestamp:Float):Void {}
+              public static function resetClientID():Void {}
+              public static function initialize():Void {}
+              public static function shutdown():Void {}
+              public static function addLuaCallbacks(lua:Dynamic):Void {}
+              public static function loadDiscordRPC():Void {}
+          }
+          EOF
 
           cp source/backend/Discord.hx source/Discord.hx 2>/dev/null || true
 
@@ -350,152 +350,152 @@ EOF
 
           # Node script to inline all JS scripts, sound files, images, fonts, and assets into 1 HTML file
           cat << 'EOF' > inline_bundler.js
-const fs = require('fs');
-const path = require('path');
+          const fs = require('fs');
+          const path = require('path');
 
-function getMimeType(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  const map = {
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.svg': 'image/svg+xml',
-    '.ogg': 'audio/ogg',
-    '.mp3': 'audio/mpeg',
-    '.wav': 'audio/wav',
-    '.json': 'application/json',
-    '.xml': 'text/xml',
-    '.txt': 'text/plain',
-    '.ttf': 'font/ttf',
-    '.woff': 'font/woff',
-    '.woff2': 'font/woff2'
-  };
-  return map[ext] || 'application/octet-stream';
-}
-
-function getAllFiles(dir, fileList = []) {
-  const files = fs.readdirSync(dir);
-  files.forEach(file => {
-    const filePath = path.join(dir, file);
-    if (fs.statSync(filePath).isDirectory()) {
-      getAllFiles(filePath, fileList);
-    } else {
-      fileList.push(filePath);
-    }
-  });
-  return fileList;
-}
-
-const baseDir = process.cwd();
-const allFiles = getAllFiles(baseDir);
-
-const virtualFS = {};
-let jsScripts = [];
-
-allFiles.forEach(file => {
-  const relativePath = path.relative(baseDir, file).replace(/\\/g, '/');
-  
-  if (relativePath === 'index.html' || relativePath === 'inline_bundler.js' || relativePath === 'standalone.html') return;
-
-  if (relativePath.endsWith('.js')) {
-    jsScripts.push(fs.readFileSync(file, 'utf8'));
-  } else {
-    const mime = getMimeType(file);
-    const base64 = fs.readFileSync(file).toString('base64');
-    virtualFS[relativePath] = `data:${mime};base64,${base64}`;
-  }
-});
-
-const standaloneHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>FNF Offline Standalone Build</title>
-    <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #000;
-        }
-        #openfl-content {
-            width: 100%;
-            height: 100%;
-        }
-    </style>
-    <script>
-        // Virtual File System for Offline Interception
-        window.__VFS__ = ${JSON.stringify(virtualFS)};
-
-        // Hook XMLHttpRequest for offline data URI serving
-        (function() {
-            const origOpen = XMLHttpRequest.prototype.open;
-            const origSend = XMLHttpRequest.prototype.send;
-
-            XMLHttpRequest.prototype.open = function(method, url, async, user, pass) {
-                this._url = url.replace(/^[./]+/, '');
-                return origOpen.apply(this, arguments);
+          function getMimeType(filePath) {
+            const ext = path.extname(filePath).toLowerCase();
+            const map = {
+              '.png': 'image/png',
+              '.jpg': 'image/jpeg',
+              '.jpeg': 'image/jpeg',
+              '.gif': 'image/gif',
+              '.svg': 'image/svg+xml',
+              '.ogg': 'audio/ogg',
+              '.mp3': 'audio/mpeg',
+              '.wav': 'audio/wav',
+              '.json': 'application/json',
+              '.xml': 'text/xml',
+              '.txt': 'text/plain',
+              '.ttf': 'font/ttf',
+              '.woff': 'font/woff',
+              '.woff2': 'font/woff2'
             };
+            return map[ext] || 'application/octet-stream';
+          }
 
-            XMLHttpRequest.prototype.send = function(data) {
-                const cleanUrl = Object.keys(window.__VFS__).find(k => this._url && (this._url.endsWith(k) || k.endsWith(this._url)));
-                if (cleanUrl && window.__VFS__[cleanUrl]) {
-                    const dataUri = window.__VFS__[cleanUrl];
-                    Object.defineProperty(this, 'responseURL', { value: dataUri });
-                    
-                    if (dataUri.startsWith('data:application/json') || dataUri.startsWith('data:text/')) {
-                        const base64Content = dataUri.split(',')[1];
-                        const decoded = atob(base64Content);
-                        Object.defineProperty(this, 'responseText', { value: decoded });
-                        Object.defineProperty(this, 'response', { value: decoded });
-                    }
-                    
-                    setTimeout(() => {
-                        Object.defineProperty(this, 'status', { value: 200 });
-                        Object.defineProperty(this, 'readyState', { value: 4 });
-                        if (typeof this.onreadystatechange === 'function') this.onreadystatechange();
-                        if (typeof this.onload === 'function') this.onload();
-                    }, 1);
-                    return;
-                }
-                return origSend.apply(this, arguments);
-            };
-        })();
-
-        // Intercept Image elements for offline embedded resources
-        const origImage = window.Image;
-        window.Image = function() {
-            const img = new origImage();
-            const origSrcSetter = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src').set;
-            Object.defineProperty(img, 'src', {
-                set: function(url) {
-                    const cleanUrl = Object.keys(window.__VFS__).find(k => url && (url.endsWith(k) || k.endsWith(url)));
-                    if (cleanUrl && window.__VFS__[cleanUrl]) {
-                        origSrcSetter.call(this, window.__VFS__[cleanUrl]);
-                    } else {
-                        origSrcSetter.call(this, url);
-                    }
-                }
+          function getAllFiles(dir, fileList = []) {
+            const files = fs.readdirSync(dir);
+            files.forEach(file => {
+              const filePath = path.join(dir, file);
+              if (fs.statSync(filePath).isDirectory()) {
+                getAllFiles(filePath, fileList);
+              } else {
+                fileList.push(filePath);
+              }
             });
-            return img;
-        };
-    </script>
-</head>
-<body>
-    <div id="openfl-content"></div>
-    <script>
-        ${jsScripts.join('\n;\n')}
-    </script>
-</body>
-</html>`;
+            return fileList;
+          }
 
-fs.writeFileSync('standalone.html', standaloneHTML);
-console.log('Successfully bundled standalone offline game into standalone.html');
-EOF
+          const baseDir = process.cwd();
+          const allFiles = getAllFiles(baseDir);
+          
+          const virtualFS = {};
+          let jsScripts = [];
+          
+          allFiles.forEach(file => {
+            const relativePath = path.relative(baseDir, file).replace(/\\/g, '/');
+            
+            if (relativePath === 'index.html' || relativePath === 'inline_bundler.js' || relativePath === 'standalone.html') return;
+
+            if (relativePath.endsWith('.js')) {
+              jsScripts.push(fs.readFileSync(file, 'utf8'));
+            } else {
+              const mime = getMimeType(file);
+              const base64 = fs.readFileSync(file).toString('base64');
+              virtualFS[relativePath] = `data:${mime};base64,${base64}`;
+            }
+          });
+
+          const standaloneHTML = `<!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+              <title>FNF Offline Standalone Build</title>
+              <style>
+                  body, html {
+                      margin: 0;
+                      padding: 0;
+                      width: 100%;
+                      height: 100%;
+                      overflow: hidden;
+                      background-color: #000;
+                  }
+                  #openfl-content {
+                      width: 100%;
+                      height: 100%;
+                  }
+              </style>
+              <script>
+                  // Virtual File System for Offline Interception
+                  window.__VFS__ = ${JSON.stringify(virtualFS)};
+
+                  // Hook XMLHttpRequest for offline data URI serving
+                  (function() {
+                      const origOpen = XMLHttpRequest.prototype.open;
+                      const origSend = XMLHttpRequest.prototype.send;
+
+                      XMLHttpRequest.prototype.open = function(method, url, async, user, pass) {
+                          this._url = url.replace(/^[./]+/, '');
+                          return origOpen.apply(this, arguments);
+                      };
+
+                      XMLHttpRequest.prototype.send = function(data) {
+                          const cleanUrl = Object.keys(window.__VFS__).find(k => this._url && (this._url.endsWith(k) || k.endsWith(this._url)));
+                          if (cleanUrl && window.__VFS__[cleanUrl]) {
+                              const dataUri = window.__VFS__[cleanUrl];
+                              Object.defineProperty(this, 'responseURL', { value: dataUri });
+                              
+                              if (dataUri.startsWith('data:application/json') || dataUri.startsWith('data:text/')) {
+                                  const base64Content = dataUri.split(',')[1];
+                                  const decoded = atob(base64Content);
+                                  Object.defineProperty(this, 'responseText', { value: decoded });
+                                  Object.defineProperty(this, 'response', { value: decoded });
+                              }
+                              
+                              setTimeout(() => {
+                                  Object.defineProperty(this, 'status', { value: 200 });
+                                  Object.defineProperty(this, 'readyState', { value: 4 });
+                                  if (typeof this.onreadystatechange === 'function') this.onreadystatechange();
+                                  if (typeof this.onload === 'function') this.onload();
+                              }, 1);
+                              return;
+                          }
+                          return origSend.apply(this, arguments);
+                      };
+                  })();
+
+                  // Intercept Image elements for offline embedded resources
+                  const origImage = window.Image;
+                  window.Image = function() {
+                      const img = new origImage();
+                      const origSrcSetter = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src').set;
+                      Object.defineProperty(img, 'src', {
+                          set: function(url) {
+                              const cleanUrl = Object.keys(window.__VFS__).find(k => url && (url.endsWith(k) || k.endsWith(url)));
+                              if (cleanUrl && window.__VFS__[cleanUrl]) {
+                                  origSrcSetter.call(this, window.__VFS__[cleanUrl]);
+                              } else {
+                                  origSrcSetter.call(this, url);
+                              }
+                          }
+                      });
+                      return img;
+                  };
+              </script>
+          </head>
+          <body>
+              <div id="openfl-content"></div>
+              <script>
+                  ${jsScripts.join('\n;\n')}
+              </script>
+          </body>
+          </html>`;
+
+          fs.writeFileSync('standalone.html', standaloneHTML);
+          console.log('Successfully bundled standalone offline game into standalone.html');
+          EOF
 
           node inline_bundler.js
           cp standalone.html index.html
