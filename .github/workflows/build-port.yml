@@ -18,7 +18,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y fontforge woff-tools woff2 zip unzip perl
-          # Ensure sfnt2woff binary alias exists for Lime web font generation
           if ! command -v sfnt2woff &> /dev/null; then
             sudo ln -s $(which woff-code-page 2>/dev/null || which woff-font-converter 2>/dev/null || echo "/usr/bin/true") /usr/local/bin/sfnt2woff || true
           fi
@@ -260,10 +259,10 @@ jobs:
           # Copy backend stub to top-level source/Discord.hx in case older Psych versions reference it
           cp source/backend/Discord.hx source/Discord.hx 2>/dev/null || true
 
-          # Remove C++ and Lua libraries from Project.xml
+          # Remove native desktop/C++ libraries from Project.xml
           sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' -e '/faxe/d' -e '/hxCodec/d' Project.xml || true
 
-          # Comment out explicit "import sys.*" lines across the codebase to stop Haxe JS compiler rejection
+          # Safely comment out sys.thread imports without corrupting syntax
           find source -name "*.hx" -type f -exec sed -i \
             -e 's/import sys\.thread\.FixedThreadPool;/ \/\/ import sys.thread.FixedThreadPool;/g' \
             -e 's/import sys\.thread\.ElasticThreadPool;/ \/\/ import sys.thread.ElasticThreadPool;/g' \
@@ -276,9 +275,7 @@ jobs:
             -e 's/sys\.thread\.Thread/Thread/g' \
             -e 's/sys\.thread\.Deque/Deque/g' \
             -e '/import cpp\./d' \
-            -e '/import llua\./d' \
-            -e 's/cpp\.[a-zA-Z0-9_]\+/Dynamic/g' \
-            -e 's/llua\.[a-zA-Z0-9_]\+/Dynamic/g' {} +
+            -e '/import llua\./d' {} +
 
           # Perl patch for FlxSoundTray constructor insertion
           find . -name "FlxSoundTray.hx" -type f -print0 | xargs -0 -r -n1 perl -0777 -i -pe \
