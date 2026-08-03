@@ -91,11 +91,10 @@ jobs:
           echo "Installing pinned flixel-addons 3.2.2..."
           haxelib install flixel-addons 3.2.2 || haxelib git flixel-addons https://github.com/HaxeFlixel/flixel-addons.git 3.2.2 || haxelib install flixel-addons
 
-          # Install required JSON & scripting dependencies
-          echo "Installing tjson 1.4.0..."
+          # Install required JSON, Animation & scripting dependencies
+          echo "Installing tjson, flxanimate, and scripting libraries..."
           haxelib install tjson 1.4.0 || haxelib install tjson
-
-          echo "Installing flixel-ui and auxiliary packages..."
+          haxelib install flxanimate 3.0.4 || haxelib install flxanimate || haxelib git flxanimate https://github.com/DotNetSonic/flxanimate.git
           haxelib install flixel-ui 2.5.0 || haxelib install flixel-ui
           haxelib install hscript || haxelib install hscript-iris || true
           haxelib install SScript || true
