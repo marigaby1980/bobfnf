@@ -64,6 +64,69 @@ jobs:
         with:
           haxe-version: 4.2.5
 
+      - name: Patch Haxe Standard Library for sys.thread on JS Target
+        run: |
+          # Locate Haxe std directory and override sys/thread target guards
+          HAXE_STD_DIR=$(dirname $(which haxe))/../std
+          if [ -d "$HAXE_STD_DIR/sys/thread" ]; then
+            echo "Patching Haxe Stdlib sys.thread target guard at $HAXE_STD_DIR/sys/thread..."
+            
+            cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/Thread.hx"
+            package sys.thread;
+            class Thread {
+                public static function create(f:Void->Void):Void { f(); }
+                public static function readMessage(block:Bool):Dynamic return null;
+                public static function sendMessage(msg:Dynamic):Void {}
+                public static function current():Thread return new Thread();
+            }
+            EOF
+
+            cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/FixedThreadPool.hx"
+            package sys.thread;
+            class FixedThreadPool {
+                public var tasksCount(default, null):Int = 0;
+                public function new(numThreads:Int) {}
+                public function run(task:Void->Void):Void {
+                    tasksCount++;
+                    try { task(); } catch(e:Dynamic) {}
+                    tasksCount--;
+                }
+                public function shutdown():Void {}
+            }
+            EOF
+
+            cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/ElasticThreadPool.hx"
+            package sys.thread;
+            class ElasticThreadPool {
+                public function new(maxThreads:Int, timeoutSeconds:Float) {}
+                public function run(task:Void->Void):Void {
+                    try { task(); } catch(e:Dynamic) {}
+                }
+                public function shutdown():Void {}
+            }
+            EOF
+
+            cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/Mutex.hx"
+            package sys.thread;
+            class Mutex {
+                public function new() {}
+                public function acquire():Void {}
+                public function release():Void {}
+            }
+            EOF
+
+            cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/Deque.hx"
+            package sys.thread;
+            class Deque<T> {
+                var q:Array<T> = [];
+                public function new() {}
+                public function add(i:T):Void { q.push(i); }
+                public function push(i:T):Void { q.unshift(i); }
+                public function pop(block:Bool):T return q.shift();
+            }
+            EOF
+          fi
+
       - name: Install Haxelibs and Dependencies
         run: |
           set -euo pipefail
@@ -255,18 +318,10 @@ jobs:
           # Remove desktop/C++ native libraries from Project.xml
           sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' -e '/faxe/d' -e '/hxCodec/d' Project.xml || true
 
-          # 3. Targeted Fix for LoadingState.hx (Removes sys.thread import on JS target specifically)
-          if [ -f "source/states/LoadingState.hx" ]; then
-            sed -i 's/import sys\.thread\.FixedThreadPool;/ \/\/ import sys.thread.FixedThreadPool;/g' source/states/LoadingState.hx
-            sed -i 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' source/states/LoadingState.hx
-          fi
+          # 3. Targeted Fix for import.hx to disable sys.thread global imports on HTML5
+          find source -name "import.hx" -type f -exec sed -i 's/import sys\.thread\./\/\/ import sys.thread./g' {} +
 
-          # 4. Targeted Fix for import.hx if present
-          if [ -f "source/import.hx" ]; then
-            sed -i 's/import sys\.thread\./\/\/ import sys.thread./g' source/import.hx
-          fi
-
-          # 5. FlxSoundTray constructor patch
+          # 4. FlxSoundTray constructor patch
           find . -name "FlxSoundTray.hx" -type f -print0 | xargs -0 -r -n1 perl -0777 -i -pe \
             "s/public function new\(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\npublic function new(/s"
 
