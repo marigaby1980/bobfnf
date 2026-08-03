@@ -41,13 +41,17 @@ jobs:
       - name: Inject Mods into Engine
         run: |
           cd engine-source
-          mkdir -p mods
-          # Inject the uploaded mod files into the target directories
-          cp -rn ../mods_upload/* mods/ || true
-          cp -rn ../mods_upload/* assets/ || true
+          mkdir -p mods assets
+          
+          # Handle nested zip folders by copying top level and nested folders
+          cp -rn ../mods_upload/* mods/ 2>/dev/null || true
+          cp -rn ../mods_upload/* assets/ 2>/dev/null || true
+          
+          # If extracted folder has an inner folder, copy its contents too
+          find ../mods_upload -mindepth 1 -maxdepth 2 -type d -exec cp -rn {}/. mods/ \; 2>/dev/null || true
 
       - name: Setup Haxe
-        uses: krdlab/setup-haxe@master
+        uses: krdlab/setup-haxe@v1
         with:
           haxe-version: 4.2.5
 
@@ -55,54 +59,163 @@ jobs:
         run: |
           cd engine-source
           haxelib setup ~/haxelib
-          haxelib install hmm --quiet
-          haxelib run hmm install --quiet
-          haxelib install lime
-          haxelib install openfl
-          haxelib install flixel
+          haxelib install hmm --quiet || true
+          haxelib run hmm install --quiet || true
+          haxelib install lime 8.0.1 --quiet || haxelib install lime --quiet
+          haxelib install openfl --quiet
+          haxelib install flixel 5.2.2 --quiet || haxelib install flixel --quiet
+          haxelib run lime setup --quiet || true
+          haxelib run lime setup flixel --quiet || true
 
-      - name: Patch HTML5 incompatible code (Mock Sys)
+      - name: Patch HTML5 Incompatible Code & Inject Sys Package Mock
         run: |
           cd engine-source
-          echo 'class FileSystem { public static function absolutePath(path:String) return path; public static function exists(path:String) return false; public static function readDirectory(path:String):Array<String> return []; public static function isDirectory(path:String) return false; public static function stat(path:String) return null; public static function fullPath(path:String) return path; public static function createDirectory(path:String) {} public static function deleteFile(path:String) {} public static function deleteDirectory(path:String) {} }' > source/FileSystem.hx
-          echo 'class File { public static function getContent(path:String) return ""; public static function getBytes(path:String) return null; public static function saveContent(path:String, c:String) return; public static function saveBytes(path:String, b:Dynamic) return; public static function copy(s:String, d:String) {} }' > source/File.hx
-          echo 'class Sys { public static function exit(code:Int) {} public static function sleep(t:Float) {} public static function command(c:String, ?a:Array<String>) return 0; public static function args():Array<String> return []; public static function getCwd() return ""; public static function setCwd(s:String) {} public static function print(v:Dynamic) {} public static function println(v:Dynamic) {} public static function environment() return new haxe.ds.StringMap<String>(); public static function getEnv(s:String) return ""; public static function programPath() return ""; }' > source/Sys.hx
-          echo 'class Process { public var stdout:Dynamic; public var stderr:Dynamic; public function new(c:String, ?a:Dynamic) { stdout = { readAll: function() return { toString: function() return "" }, readLine: function() return "" }; stderr = stdout; } public function exitCode(b:Bool=true) return 0; public function close() {} }' > source/Process.hx
-          echo 'class Thread { public static function create(f:Void->Void) { f(); } public static function readMessage(b:Bool) return null; public static function sendMessage(m:Dynamic) {} }' > source/Thread.hx
-          echo 'class Mutex { public function new() {} public function acquire() {} public function release() {} }' > source/Mutex.hx
           
-          sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' Project.xml || true
-          mkdir -p source/hxdiscord_rpc
-          echo 'package hxdiscord_rpc; class Discord { public static function Initialize(a:String,b:Bool,c:Dynamic){} public static function Shutdown(){} public static function RunCallbacks(){} public static function UpdatePresence(a:Dynamic){} public static function ClearPresence(){} }' > source/hxdiscord_rpc/Discord.hx
-          echo 'package hxdiscord_rpc; class Types { public static inline var DISCORD_REPLY_NO=0; public static inline var DISCORD_REPLY_YES=1; public static inline var DISCORD_REPLY_IGNORE=2; }' > source/hxdiscord_rpc/Types.hx
-          echo 'package hxdiscord_rpc; typedef DiscordPresence = Dynamic;' > source/hxdiscord_rpc/DiscordPresence.hx
+          # Create proper Haxe sys package structure
+          mkdir -p source/sys/io source/sys/thread source/hxdiscord_rpc
+          
+          # Mock sys.FileSystem
+          cat << 'EOF' > source/sys/FileSystem.hx
+          package sys;
+          class FileSystem {
+              public static function absolutePath(path:String):String return path;
+              public static function exists(path:String):Bool return false;
+              public static function readDirectory(path:String):Array<String> return [];
+              public static function isDirectory(path:String):Bool return false;
+              public static function stat(path:String):Dynamic return null;
+              public static function fullPath(path:String):String return path;
+              public static function createDirectory(path:String):Void {}
+              public static function deleteFile(path:String):Void {}
+              public static function deleteDirectory(path:String):Void {}
+          }
+          EOF
 
-          find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g'                                                           -e 's/sys\.io\.File/File/g'                                                           -e 's/sys\.io\.Process/Process/g'                                                           -e 's/sys\.thread\.Thread/Thread/g'                                                           -e 's/sys\.thread\.Mutex/Mutex/g'                                                           -e '/import cpp/d'                                                           -e 's/cpp\.[a-zA-Z0-9_]+/Dynamic/g'                                                           -e '/import llua/d'                                                           -e 's/llua\.[a-zA-Z0-9_]+/Dynamic/g' {} +
+          # Mock sys.io.File
+          cat << 'EOF' > source/sys/io/File.hx
+          package sys.io;
+          class File {
+              public static function getContent(path:String):String return "";
+              public static function getBytes(path:String):haxe.io.Bytes return null;
+              public static function saveContent(path:String, c:String):Void {}
+              public static function saveBytes(path:String, b:Dynamic):Void {}
+              public static function copy(s:String, d:String):Void {}
+          }
+          EOF
+
+          # Mock sys.io.Process
+          cat << 'EOF' > source/sys/io/Process.hx
+          package sys.io;
+          class Process {
+              public var stdout:Dynamic;
+              public var stderr:Dynamic;
+              public function new(cmd:String, ?args:Array<String>) {
+                  stdout = { readAll: function() return { toString: function() return "" }, readLine: function() return "" };
+                  stderr = stdout;
+              }
+              public function exitCode(block:Bool=true):Int return 0;
+              public function close():Void {}
+          }
+          EOF
+
+          # Mock sys.thread.Thread
+          cat << 'EOF' > source/sys/thread/Thread.hx
+          package sys.thread;
+          class Thread {
+              public static function create(f:Void->Void):Void { f(); }
+              public static function readMessage(block:Bool):Dynamic return null;
+              public static function sendMessage(msg:Dynamic):Void {}
+          }
+          EOF
+
+          # Mock sys.thread.Mutex
+          cat << 'EOF' > source/sys/thread/Mutex.hx
+          package sys.thread;
+          class Mutex {
+              public function new() {}
+              public function acquire():Void {}
+              public function release():Void {}
+          }
+          EOF
+
+          # Mock top-level Sys class
+          cat << 'EOF' > source/Sys.hx
+          class Sys {
+              public static function exit(code:Int):Void {}
+              public static function sleep(t:Float):Void {}
+              public static function command(cmd:String, ?args:Array<String>):Int return 0;
+              public static function args():Array<String> return [];
+              public static function getCwd():String return "";
+              public static function setCwd(s:String):Void {}
+              public static function print(v:Dynamic):Void {}
+              public static function println(v:Dynamic):Void {}
+              public static function environment():Map<String,String> return new Map<String,String>();
+              public static function getEnv(s:String):String return "";
+              public static function programPath():String return "";
+              public static function systemName():String return "HTML5";
+              public static function time():Float return Date.now().getTime() / 1000;
+          }
+          EOF
+
+          # Mock Discord RPC dependencies
+          cat << 'EOF' > source/hxdiscord_rpc/Discord.hx
+          package hxdiscord_rpc;
+          class Discord {
+              public static function Initialize(a:String, b:Bool, c:Dynamic):Void {}
+              public static function Shutdown():Void {}
+              public static function RunCallbacks():Void {}
+              public static function UpdatePresence(a:Dynamic):Void {}
+              public static function ClearPresence():Void {}
+          }
+          EOF
+
+          cat << 'EOF' > source/hxdiscord_rpc/Types.hx
+          package hxdiscord_rpc;
+          class Types {
+              public static inline var DISCORD_REPLY_NO = 0;
+              public static inline var DISCORD_REPLY_YES = 1;
+              public static inline var DISCORD_REPLY_IGNORE = 2;
+          }
+          EOF
+
+          cat << 'EOF' > source/hxdiscord_rpc/DiscordPresence.hx
+          package hxdiscord_rpc;
+          typedef DiscordPresence = Dynamic;
+          EOF
+
+          # Remove C++ and Lua libraries from Project.xml
+          sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' -e '/faxe/d' Project.xml || true
+          
+          # Safely strip unsupported native imports
+          find source -name "*.hx" -type f -exec sed -i \
+            -e '/import cpp\./d' \
+            -e '/import llua\./d' \
+            -e 's/cpp\.[a-zA-Z0-9_]\+/Dynamic/g' \
+            -e 's/llua\.[a-zA-Z0-9_]\+/Dynamic/g' {} +
+
+          # Patch FlxSoundTray method signatures for newer Flixel compatibility
           find . -name "FlxSoundTray.hx" -type f -exec sed -i 's/public function new(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\n&/g' {} +
 
       - name: Optimization & Web Compile Build
         run: |
           cd engine-source
-          # Adds flags to make HTML5 compile lightweight as requested
-          haxelib run lime build html5 -release -D DISCORD_DISABLE -D NO_PRELOAD_ALL
+          haxelib run lime build html5 -release -D DISCORD_DISABLE -D LUA_DISABLED -D NO_PRELOAD_ALL
 
       - name: Package Flat ZIP & Standardize output
         run: |
           cd engine-source/export/release/html5/bin
           
-          # Rename main engine JS file to funkin.js for easier jsDelivr/CDN embedding
-          MAIN_JS=$(ls *.js | grep -E -v 'howler|pako' | head -n 1)
+          # Rename main JS file to funkin.js for consistent embedding
+          MAIN_JS=$(ls *.js 2>/dev/null | grep -E -v 'howler|pako' | head -n 1)
           if [ -n "$MAIN_JS" ] && [ "$MAIN_JS" != "funkin.js" ]; then
             mv "$MAIN_JS" funkin.js
-            # Update index.html to use the new JS filename
             if [ -f "index.html" ]; then
               sed -i "s/$MAIN_JS/funkin.js/g" index.html
             fi
           fi
           
-          # Ensure index.html exists fallback
+          # Ensure index.html fallback
           if [ ! -f "index.html" ]; then
-            echo "<!DOCTYPE html><html><body><h1>FNF Web Build</h1><script src='funkin.js'></script></body></html>" > index.html
+            echo "<!DOCTYPE html><html><head><title>FNF Web Port</title></head><body><script src='funkin.js'></script></body></html>" > index.html
           fi
           
           zip -r ../../../../../web_export.zip *
@@ -122,3 +235,4 @@ jobs:
           git add .
           git commit -m "Automated Web Port Build"
           git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build
+
