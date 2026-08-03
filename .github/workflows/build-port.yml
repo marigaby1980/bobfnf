@@ -14,10 +14,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Install System Dependencies (Font Generators & Tools)
+      - name: Install System Dependencies (Font Generators & Build Tools)
         run: |
           sudo apt-get update
-          sudo apt-get install -y fontforge woff-tools zip unzip perl
+          sudo apt-get install -y fontforge woff-tools woff2 zip unzip perl
 
       - name: Checkout Base Engine
         uses: actions/checkout@v4
@@ -112,93 +112,16 @@ jobs:
           echo "=== INSTALLED HAXELIB LIST ==="
           haxelib list
 
-      - name: Patch HTML5 Incompatible Code & Inject Sys Package Mock
+      - name: Patch HTML5 Incompatible Code & Inject Top-Level Stubs
         run: |
           set -euo pipefail
           cd engine-source
           
-          # Create proper Haxe sys package structure including thread models
-          mkdir -p source/sys/io source/sys/thread source/hxdiscord_rpc
+          # Create Discord RPC mock package
+          mkdir -p source/hxdiscord_rpc
           
-          # Mock sys.FileSystem
-          cat << 'EOF' > source/sys/FileSystem.hx
-          package sys;
-          class FileSystem {
-              public static function absolutePath(path:String):String return path;
-              public static function exists(path:String):Bool return false;
-              public static function readDirectory(path:String):Array<String> return [];
-              public static function isDirectory(path:String):Bool return false;
-              public static function stat(path:String):Dynamic return null;
-              public static function fullPath(path:String):String return path;
-              public static function createDirectory(path:String):Void {}
-              public static function deleteFile(path:String):Void {}
-              public static function deleteDirectory(path:String):Void {}
-          }
-          EOF
-
-          # Mock sys.io.File
-          cat << 'EOF' > source/sys/io/File.hx
-          package sys.io;
-          class File {
-              public static function getContent(path:String):String return "";
-              public static function getBytes(path:String):haxe.io.Bytes return null;
-              public static function saveContent(path:String, c:String):Void {}
-              public static function saveBytes(path:String, b:Dynamic):Void {}
-              public static function copy(s:String, d:String):Void {}
-          }
-          EOF
-
-          # Mock sys.io.Process
-          cat << 'EOF' > source/sys/io/Process.hx
-          package sys.io;
-          class Process {
-              public var stdout:Dynamic;
-              public var stderr:Dynamic;
-              public function new(cmd:String, ?args:Array<String>) {
-                  stdout = { readAll: function() return { toString: function() return "" }, readLine: function() return "" };
-                  stderr = stdout;
-              }
-              public function exitCode(block:Bool=true):Int return 0;
-              public function close():Void {}
-          }
-          EOF
-
-          # Mock sys.thread.Thread
-          cat << 'EOF' > source/sys/thread/Thread.hx
-          package sys.thread;
-          class Thread {
-              public static function create(f:Void->Void):Void { f(); }
-              public static function readMessage(block:Bool):Dynamic return null;
-              public static function sendMessage(msg:Dynamic):Void {}
-              public static function current():Thread return new Thread();
-          }
-          EOF
-
-          # Mock sys.thread.Mutex
-          cat << 'EOF' > source/sys/thread/Mutex.hx
-          package sys.thread;
-          class Mutex {
-              public function new() {}
-              public function acquire():Void {}
-              public function release():Void {}
-          }
-          EOF
-
-          # Mock sys.thread.Deque
-          cat << 'EOF' > source/sys/thread/Deque.hx
-          package sys.thread;
-          class Deque<T> {
-              var q:Array<T> = [];
-              public function new() {}
-              public function add(i:T):Void { q.push(i); }
-              public function push(i:T):Void { q.unshift(i); }
-              public function pop(block:Bool):T return q.shift();
-          }
-          EOF
-
-          # Mock sys.thread.FixedThreadPool (Fixes target incompatibility)
-          cat << 'EOF' > source/sys/thread/FixedThreadPool.hx
-          package sys.thread;
+          # 1. Top-Level FixedThreadPool (Bypasses sys package restriction on JS target)
+          cat << 'EOF' > source/FixedThreadPool.hx
           class FixedThreadPool {
               public var tasksCount(default, null):Int = 0;
               public function new(numThreads:Int) {}
@@ -211,9 +134,8 @@ jobs:
           }
           EOF
 
-          # Mock sys.thread.ElasticThreadPool
-          cat << 'EOF' > source/sys/thread/ElasticThreadPool.hx
-          package sys.thread;
+          # 2. Top-Level ElasticThreadPool
+          cat << 'EOF' > source/ElasticThreadPool.hx
           class ElasticThreadPool {
               public function new(maxThreads:Int, timeoutSeconds:Float) {}
               public function run(task:Void->Void):Void {
@@ -223,7 +145,37 @@ jobs:
           }
           EOF
 
-          # Mock top-level Sys class
+          # 3. Top-Level Thread Stub
+          cat << 'EOF' > source/Thread.hx
+          class Thread {
+              public static function create(f:Void->Void):Void { f(); }
+              public static function readMessage(block:Bool):Dynamic return null;
+              public static function sendMessage(msg:Dynamic):Void {}
+              public static function current():Thread return new Thread();
+          }
+          EOF
+
+          # 4. Top-Level Mutex Stub
+          cat << 'EOF' > source/Mutex.hx
+          class Mutex {
+              public function new() {}
+              public function acquire():Void {}
+              public function release():Void {}
+          }
+          EOF
+
+          # 5. Top-Level Deque Stub
+          cat << 'EOF' > source/Deque.hx
+          class Deque<T> {
+              var q:Array<T> = [];
+              public function new() {}
+              public function add(i:T):Void { q.push(i); }
+              public function push(i:T):Void { q.unshift(i); }
+              public function pop(block:Bool):T return q.shift();
+          }
+          EOF
+
+          # 6. Top-Level Sys Mock
           cat << 'EOF' > source/Sys.hx
           class Sys {
               public static function exit(code:Int):Void {}
@@ -268,11 +220,21 @@ jobs:
           typedef DiscordPresence = Dynamic;
           EOF
 
-          # Remove C++ and Lua libraries from Project.xml
+          # Strip native libraries from Project.xml
           sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' -e '/faxe/d' -e '/hxCodec/d' Project.xml || true
-          
-          # Safely strip unsupported native imports
+
+          # Comment out explicit "import sys.*" lines across the codebase to stop Haxe JS compiler rejection
           find source -name "*.hx" -type f -exec sed -i \
+            -e 's/import sys\.thread\.FixedThreadPool;/ \/\/ import sys.thread.FixedThreadPool;/g' \
+            -e 's/import sys\.thread\.ElasticThreadPool;/ \/\/ import sys.thread.ElasticThreadPool;/g' \
+            -e 's/import sys\.thread\.Mutex;/ \/\/ import sys.thread.Mutex;/g' \
+            -e 's/import sys\.thread\.Thread;/ \/\/ import sys.thread.Thread;/g' \
+            -e 's/import sys\.thread\.Deque;/ \/\/ import sys.thread.Deque;/g' \
+            -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
+            -e 's/sys\.thread\.ElasticThreadPool/ElasticThreadPool/g' \
+            -e 's/sys\.thread\.Mutex/Mutex/g' \
+            -e 's/sys\.thread\.Thread/Thread/g' \
+            -e 's/sys\.thread\.Deque/Deque/g' \
             -e '/import cpp\./d' \
             -e '/import llua\./d' \
             -e 's/cpp\.[a-zA-Z0-9_]\+/Dynamic/g' \
