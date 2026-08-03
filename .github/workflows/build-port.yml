@@ -501,7 +501,7 @@ EOF
           cp standalone.html index.html
 
       - name: Upload Single Standalone Offline HTML File
-        uses: arguments/upload-artifact@v4
+        uses: actions/upload-artifact@v4
         with:
           name: standalone-offline-game
           path: engine-source/export/release/html5/bin/standalone.html
