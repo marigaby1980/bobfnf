@@ -22,6 +22,7 @@ jobs:
 
       - name: Download Mod Payload
         run: |
+          set -euo pipefail
           echo "Downloading mod from URL provided..."
           pip install gdown --quiet
           
@@ -57,39 +58,53 @@ jobs:
 
       - name: Install Haxelibs and Dependencies
         run: |
+          set -euo pipefail
           cd engine-source
-          haxelib setup ~/haxelib
 
-          # Check if hmm.json exists before attempting hmm install
-          haxelib install hmm || true
+          echo "=== SYSTEM DIAGNOSTICS ==="
+          haxe -version || true
+          node -v || true
+
+          haxelib setup ~/haxelib
+          echo "=== HAXELIB CONFIG ==="
+          haxelib config
+
+          # Optional Haxe Package Manager check
           if [ -f "hmm.json" ]; then
-            echo "Found hmm.json, running hmm install..."
+            echo "Found hmm.json, installing hmm..."
+            haxelib install hmm || true
             haxelib run hmm install || true
           else
-            echo "No hmm.json found in repository root. Skipping hmm install."
+            echo "No hmm.json found in repository root. Skipping hmm."
           fi
 
           # Install pinned base dependencies required by Psych Engine
+          echo "Installing Lime and OpenFL..."
           haxelib install lime 8.0.1 || haxelib install lime
           haxelib install openfl 9.3.3 || haxelib install openfl
-          
-          # Pin flixel to exact version required by modern Psych Engine (5.6.1)
+
+          # Pin flixel to exact version required by engine (5.6.1)
           echo "Installing pinned Flixel 5.6.1..."
           haxelib install flixel 5.6.1 || haxelib git flixel https://github.com/HaxeFlixel/flixel.git 5.6.1
-          haxelib install flixel-addons 3.2.3 || haxelib install flixel-addons
+
+          # Pin flixel-addons to exact version required by Project.xml (3.2.2)
+          echo "Installing pinned flixel-addons 3.2.2..."
+          haxelib install flixel-addons 3.2.2 || haxelib git flixel-addons https://github.com/HaxeFlixel/flixel-addons.git 3.2.2 || haxelib install flixel-addons
+
+          echo "Installing flixel-ui and auxiliary packages..."
           haxelib install flixel-ui 2.5.0 || haxelib install flixel-ui
-          haxelib install hscript || true
+          haxelib install hscript || haxelib install hscript-iris || true
 
           # Configure Lime & Flixel environments
           haxelib run lime setup
           haxelib run lime setup flixel
 
-          # Print installed libraries for debugging
           echo "=== INSTALLED HAXELIB LIST ==="
           haxelib list
 
       - name: Patch HTML5 Incompatible Code & Inject Sys Package Mock
         run: |
+          set -euo pipefail
           cd engine-source
           
           # Create proper Haxe sys package structure
@@ -213,18 +228,36 @@ jobs:
             -e 's/cpp\.[a-zA-Z0-9_]\+/Dynamic/g' \
             -e 's/llua\.[a-zA-Z0-9_]\+/Dynamic/g' {} +
 
-          # Patch FlxSoundTray method signatures for newer Flixel compatibility
-          find . -name "FlxSoundTray.hx" -type f -exec sed -i 's/public function new(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\n&/g' {} +
+          # Perl patch for FlxSoundTray constructor insertion
+          find . -name "FlxSoundTray.hx" -type f -print0 | xargs -0 -r -n1 perl -0777 -i -pe \
+            "s/public function new\(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\npublic function new(/s"
 
-      - name: Optimization & Web Compile Build
+      - name: Print Build Environment & Project Configuration
         run: |
           cd engine-source
+          echo "=== PROJECT.XML HEAD ==="
+          head -n 50 Project.xml
+
+      - name: Web Compile Build
+        run: |
+          set -euo pipefail
+          cd engine-source
           haxelib run lime build html5 -release -D DISCORD_DISABLE -D LUA_DISABLED
+          
+          echo "=== COMPILATION COMPLETE. EXPORT CONTENTS: ==="
+          ls -la export/release/html5 || true
 
       - name: Bundle into Single Offline Standalone HTML File
         run: |
+          set -euo pipefail
           cd engine-source/export/release/html5/bin
           
+          if [ ! -f "index.html" ]; then
+            echo "Error: index.html not found in build output directory."
+            ls -la
+            exit 1
+          fi
+
           # Node script to inline all JS scripts, sound files, images, fonts, and assets into 1 HTML file
           cat << 'EOF' > inline_bundler.js
           const fs = require('fs');
@@ -385,6 +418,7 @@ jobs:
 
       - name: Auto-Publish to GitHub Branch
         run: |
+          set -euo pipefail
           cd engine-source/export/release/html5/bin
           mkdir -p deploy
           cp standalone.html deploy/index.html
