@@ -91,9 +91,15 @@ jobs:
           echo "Installing pinned flixel-addons 3.2.2..."
           haxelib install flixel-addons 3.2.2 || haxelib git flixel-addons https://github.com/HaxeFlixel/flixel-addons.git 3.2.2 || haxelib install flixel-addons
 
+          # Install required JSON & scripting dependencies
+          echo "Installing tjson 1.4.0..."
+          haxelib install tjson 1.4.0 || haxelib install tjson
+
           echo "Installing flixel-ui and auxiliary packages..."
           haxelib install flixel-ui 2.5.0 || haxelib install flixel-ui
           haxelib install hscript || haxelib install hscript-iris || true
+          haxelib install SScript || true
+          haxelib install hxAnimate || true
 
           # Configure Lime & Flixel environments
           haxelib run lime setup
@@ -219,7 +225,7 @@ jobs:
           EOF
 
           # Remove C++ and Lua libraries from Project.xml
-          sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' -e '/faxe/d' Project.xml || true
+          sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' -e '/faxe/d' -e '/hxCodec/d' Project.xml || true
           
           # Safely strip unsupported native imports
           find source -name "*.hx" -type f -exec sed -i \
@@ -242,10 +248,7 @@ jobs:
         run: |
           set -euo pipefail
           cd engine-source
-          haxelib run lime build html5 -release -D DISCORD_DISABLE -D LUA_DISABLED
-          
-          echo "=== COMPILATION COMPLETE. EXPORT CONTENTS: ==="
-          ls -la export/release/html5 || true
+          haxelib run lime build html5 -release -D DISCORD_DISABLE -D LUA_DISABLED -D VIDMOD_ENABLED=false
 
       - name: Bundle into Single Offline Standalone HTML File
         run: |
