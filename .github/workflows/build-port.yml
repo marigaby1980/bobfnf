@@ -1,4 +1,4 @@
-name: Build FNF Web Port
+name: Build Standalone Offline FNF Port
 
 on:
   workflow_dispatch:
@@ -198,41 +198,180 @@ jobs:
       - name: Optimization & Web Compile Build
         run: |
           cd engine-source
-          haxelib run lime build html5 -release -D DISCORD_DISABLE -D LUA_DISABLED -D NO_PRELOAD_ALL
+          haxelib run lime build html5 -release -D DISCORD_DISABLE -D LUA_DISABLED
 
-      - name: Package Flat ZIP & Standardize output
+      - name: Bundle into Single Offline Standalone HTML File
         run: |
           cd engine-source/export/release/html5/bin
           
-          # Rename main JS file to funkin.js for consistent embedding
-          MAIN_JS=$(ls *.js 2>/dev/null | grep -E -v 'howler|pako' | head -n 1)
-          if [ -n "$MAIN_JS" ] && [ "$MAIN_JS" != "funkin.js" ]; then
-            mv "$MAIN_JS" funkin.js
-            if [ -f "index.html" ]; then
-              sed -i "s/$MAIN_JS/funkin.js/g" index.html
-            fi
-          fi
-          
-          # Ensure index.html fallback
-          if [ ! -f "index.html" ]; then
-            echo "<!DOCTYPE html><html><head><title>FNF Web Port</title></head><body><script src='funkin.js'></script></body></html>" > index.html
-          fi
-          
-          zip -r ../../../../../web_export.zip *
+          # Node script to inline all JS scripts, sound files, images, fonts, and assets into 1 HTML file
+          cat << 'EOF' > inline_bundler.js
+          const fs = require('fs');
+          const path = require('path');
 
-      - name: Upload Web Export
+          function getMimeType(filePath) {
+            const ext = path.extname(filePath).toLowerCase();
+            const map = {
+              '.png': 'image/png',
+              '.jpg': 'image/jpeg',
+              '.jpeg': 'image/jpeg',
+              '.gif': 'image/gif',
+              '.svg': 'image/svg+xml',
+              '.ogg': 'audio/ogg',
+              '.mp3': 'audio/mpeg',
+              '.wav': 'audio/wav',
+              '.json': 'application/json',
+              '.xml': 'text/xml',
+              '.txt': 'text/plain',
+              '.ttf': 'font/ttf',
+              '.woff': 'font/woff',
+              '.woff2': 'font/woff2'
+            };
+            return map[ext] || 'application/octet-stream';
+          }
+
+          function getAllFiles(dir, fileList = []) {
+            const files = fs.readdirSync(dir);
+            files.forEach(file => {
+              const filePath = path.join(dir, file);
+              if (fs.statSync(filePath).isDirectory()) {
+                getAllFiles(filePath, fileList);
+              } else {
+                fileList.push(filePath);
+              }
+            });
+            return fileList;
+          }
+
+          const baseDir = process.cwd();
+          const allFiles = getAllFiles(baseDir);
+          
+          const virtualFS = {};
+          let jsScripts = [];
+          
+          allFiles.forEach(file => {
+            const relativePath = path.relative(baseDir, file).replace(/\\/g, '/');
+            
+            if (relativePath === 'index.html' || relativePath === 'inline_bundler.js' || relativePath === 'standalone.html') return;
+
+            if (relativePath.endsWith('.js')) {
+              jsScripts.push(fs.readFileSync(file, 'utf8'));
+            } else {
+              const mime = getMimeType(file);
+              const base64 = fs.readFileSync(file).toString('base64');
+              virtualFS[relativePath] = `data:${mime};base64,${base64}`;
+            }
+          });
+
+          const standaloneHTML = `<!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+              <title>FNF Offline Standalone Build</title>
+              <style>
+                  body, html {
+                      margin: 0;
+                      padding: 0;
+                      width: 100%;
+                      height: 100%;
+                      overflow: hidden;
+                      background-color: #000;
+                  }
+                  #openfl-content {
+                      width: 100%;
+                      height: 100%;
+                  }
+              </style>
+              <script>
+                  // Virtual File System for Offline Interception
+                  window.__VFS__ = ${JSON.stringify(virtualFS)};
+
+                  // Hook XMLHttpRequest for offline data URI serving
+                  (function() {
+                      const origOpen = XMLHttpRequest.prototype.open;
+                      const origSend = XMLHttpRequest.prototype.send;
+
+                      XMLHttpRequest.prototype.open = function(method, url, async, user, pass) {
+                          this._url = url.replace(/^[./]+/, '');
+                          return origOpen.apply(this, arguments);
+                      };
+
+                      XMLHttpRequest.prototype.send = function(data) {
+                          const cleanUrl = Object.keys(window.__VFS__).find(k => this._url && (this._url.endsWith(k) || k.endsWith(this._url)));
+                          if (cleanUrl && window.__VFS__[cleanUrl]) {
+                              const dataUri = window.__VFS__[cleanUrl];
+                              Object.defineProperty(this, 'responseURL', { value: dataUri });
+                              
+                              if (dataUri.startsWith('data:application/json') || dataUri.startsWith('data:text/')) {
+                                  const base64Content = dataUri.split(',')[1];
+                                  const decoded = atob(base64Content);
+                                  Object.defineProperty(this, 'responseText', { value: decoded });
+                                  Object.defineProperty(this, 'response', { value: decoded });
+                              }
+                              
+                              setTimeout(() => {
+                                  Object.defineProperty(this, 'status', { value: 200 });
+                                  Object.defineProperty(this, 'readyState', { value: 4 });
+                                  if (typeof this.onreadystatechange === 'function') this.onreadystatechange();
+                                  if (typeof this.onload === 'function') this.onload();
+                              }, 1);
+                              return;
+                          }
+                          return origSend.apply(this, arguments);
+                      };
+                  })();
+
+                  // Intercept Image and Audio elements for offline embedded resources
+                  const origImage = window.Image;
+                  window.Image = function() {
+                      const img = new origImage();
+                      const origSrcSetter = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src').set;
+                      Object.defineProperty(img, 'src', {
+                          set: function(url) {
+                              const cleanUrl = Object.keys(window.__VFS__).find(k => url && (url.endsWith(k) || k.endsWith(url)));
+                              if (cleanUrl && window.__VFS__[cleanUrl]) {
+                                  origSrcSetter.call(this, window.__VFS__[cleanUrl]);
+                              } else {
+                                  origSrcSetter.call(this, url);
+                              }
+                          }
+                      });
+                      return img;
+                  };
+              </script>
+          </head>
+          <body>
+              <div id="openfl-content"></div>
+              <script>
+                  ${jsScripts.join('\n;\n')}
+              </script>
+          </body>
+          </html>`;
+
+          fs.writeFileSync('standalone.html', standaloneHTML);
+          console.log('Successfully bundled standalone offline game into standalone.html');
+          EOF
+
+          node inline_bundler.js
+          cp standalone.html index.html
+
+      - name: Upload Single Standalone Offline HTML File
         uses: actions/upload-artifact@v4
         with:
-          name: web-export
-          path: web_export.zip
+          name: standalone-offline-game
+          path: engine-source/export/release/html5/bin/standalone.html
 
       - name: Auto-Publish to GitHub Branch
         run: |
           cd engine-source/export/release/html5/bin
+          mkdir -p deploy
+          cp standalone.html deploy/index.html
+          cd deploy
           git init
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .
-          git commit -m "Automated Web Port Build"
+          git add index.html
+          git commit -m "Automated Single-File Offline Web Port"
           git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build
 
