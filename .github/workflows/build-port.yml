@@ -115,7 +115,7 @@ jobs:
           echo "=== INSTALLED HAXELIB LIST ==="
           haxelib list
 
-      - name: Patch HTML5 Incompatible Code & Inject Top-Level Stubs
+      - name: Patch HTML5 Incompatible Code & Inject Target-Specific Stubs
         run: |
           set -euo pipefail
           cd engine-source
@@ -123,7 +123,7 @@ jobs:
           # Create Discord RPC mock package and subdirectories
           mkdir -p source/hxdiscord_rpc source/backend
           
-          # 1. Top-Level FixedThreadPool (Bypasses sys package restriction on JS target)
+          # 1. Top-Level ThreadPool Stubs for JS target
           cat << 'EOF' > source/FixedThreadPool.hx
           class FixedThreadPool {
               public var tasksCount(default, null):Int = 0;
@@ -137,7 +137,6 @@ jobs:
           }
           EOF
 
-          # 2. Top-Level ElasticThreadPool
           cat << 'EOF' > source/ElasticThreadPool.hx
           class ElasticThreadPool {
               public function new(maxThreads:Int, timeoutSeconds:Float) {}
@@ -148,7 +147,6 @@ jobs:
           }
           EOF
 
-          # 3. Top-Level Thread Stub
           cat << 'EOF' > source/Thread.hx
           class Thread {
               public static function create(f:Void->Void):Void { f(); }
@@ -158,7 +156,6 @@ jobs:
           }
           EOF
 
-          # 4. Top-Level Mutex Stub
           cat << 'EOF' > source/Mutex.hx
           class Mutex {
               public function new() {}
@@ -167,7 +164,6 @@ jobs:
           }
           EOF
 
-          # 5. Top-Level Deque Stub
           cat << 'EOF' > source/Deque.hx
           class Deque<T> {
               var q:Array<T> = [];
@@ -178,7 +174,6 @@ jobs:
           }
           EOF
 
-          # 6. Top-Level Sys Mock
           cat << 'EOF' > source/Sys.hx
           class Sys {
               public static function exit(code:Int):Void {}
@@ -197,7 +192,7 @@ jobs:
           }
           EOF
 
-          # 7. Mock DiscordRichPresence & Discord Presence types
+          # 2. Mock Discord RPC Types & Stubs
           cat << 'EOF' > source/DiscordRichPresence.hx
           typedef DiscordRichPresence = Dynamic;
           EOF
@@ -236,7 +231,6 @@ jobs:
           }
           EOF
 
-          # 8. Complete Stub for Psych Engine's backend.Discord / DiscordClient
           cat << 'EOF' > source/backend/Discord.hx
           package backend;
 
@@ -256,28 +250,23 @@ jobs:
           }
           EOF
 
-          # Copy backend stub to top-level source/Discord.hx in case older Psych versions reference it
           cp source/backend/Discord.hx source/Discord.hx 2>/dev/null || true
 
-          # Remove native desktop/C++ libraries from Project.xml
+          # Remove desktop/C++ native libraries from Project.xml
           sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' -e '/faxe/d' -e '/hxCodec/d' Project.xml || true
 
-          # Safely comment out sys.thread imports without corrupting syntax
-          find source -name "*.hx" -type f -exec sed -i \
-            -e 's/import sys\.thread\.FixedThreadPool;/ \/\/ import sys.thread.FixedThreadPool;/g' \
-            -e 's/import sys\.thread\.ElasticThreadPool;/ \/\/ import sys.thread.ElasticThreadPool;/g' \
-            -e 's/import sys\.thread\.Mutex;/ \/\/ import sys.thread.Mutex;/g' \
-            -e 's/import sys\.thread\.Thread;/ \/\/ import sys.thread.Thread;/g' \
-            -e 's/import sys\.thread\.Deque;/ \/\/ import sys.thread.Deque;/g' \
-            -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' \
-            -e 's/sys\.thread\.ElasticThreadPool/ElasticThreadPool/g' \
-            -e 's/sys\.thread\.Mutex/Mutex/g' \
-            -e 's/sys\.thread\.Thread/Thread/g' \
-            -e 's/sys\.thread\.Deque/Deque/g' \
-            -e '/import cpp\./d' \
-            -e '/import llua\./d' {} +
+          # 3. Targeted Fix for LoadingState.hx (Removes sys.thread import on JS target specifically)
+          if [ -f "source/states/LoadingState.hx" ]; then
+            sed -i 's/import sys\.thread\.FixedThreadPool;/ \/\/ import sys.thread.FixedThreadPool;/g' source/states/LoadingState.hx
+            sed -i 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' source/states/LoadingState.hx
+          fi
 
-          # Perl patch for FlxSoundTray constructor insertion
+          # 4. Targeted Fix for import.hx if present
+          if [ -f "source/import.hx" ]; then
+            sed -i 's/import sys\.thread\./\/\/ import sys.thread./g' source/import.hx
+          fi
+
+          # 5. FlxSoundTray constructor patch
           find . -name "FlxSoundTray.hx" -type f -print0 | xargs -0 -r -n1 perl -0777 -i -pe \
             "s/public function new\(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\npublic function new(/s"
 
