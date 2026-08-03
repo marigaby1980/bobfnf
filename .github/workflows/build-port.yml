@@ -14,6 +14,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Install System Dependencies (Font Generators & Tools)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fontforge woff-tools zip unzip perl
+
       - name: Checkout Base Engine
         uses: actions/checkout@v4
         with:
@@ -112,7 +117,7 @@ jobs:
           set -euo pipefail
           cd engine-source
           
-          # Create proper Haxe sys package structure
+          # Create proper Haxe sys package structure including thread models
           mkdir -p source/sys/io source/sys/thread source/hxdiscord_rpc
           
           # Mock sys.FileSystem
@@ -165,6 +170,7 @@ jobs:
               public static function create(f:Void->Void):Void { f(); }
               public static function readMessage(block:Bool):Dynamic return null;
               public static function sendMessage(msg:Dynamic):Void {}
+              public static function current():Thread return new Thread();
           }
           EOF
 
@@ -175,6 +181,45 @@ jobs:
               public function new() {}
               public function acquire():Void {}
               public function release():Void {}
+          }
+          EOF
+
+          # Mock sys.thread.Deque
+          cat << 'EOF' > source/sys/thread/Deque.hx
+          package sys.thread;
+          class Deque<T> {
+              var q:Array<T> = [];
+              public function new() {}
+              public function add(i:T):Void { q.push(i); }
+              public function push(i:T):Void { q.unshift(i); }
+              public function pop(block:Bool):T return q.shift();
+          }
+          EOF
+
+          # Mock sys.thread.FixedThreadPool (Fixes target incompatibility)
+          cat << 'EOF' > source/sys/thread/FixedThreadPool.hx
+          package sys.thread;
+          class FixedThreadPool {
+              public var tasksCount(default, null):Int = 0;
+              public function new(numThreads:Int) {}
+              public function run(task:Void->Void):Void {
+                  tasksCount++;
+                  try { task(); } catch(e:Dynamic) {}
+                  tasksCount--;
+              }
+              public function shutdown():Void {}
+          }
+          EOF
+
+          # Mock sys.thread.ElasticThreadPool
+          cat << 'EOF' > source/sys/thread/ElasticThreadPool.hx
+          package sys.thread;
+          class ElasticThreadPool {
+              public function new(maxThreads:Int, timeoutSeconds:Float) {}
+              public function run(task:Void->Void):Void {
+                  try { task(); } catch(e:Dynamic) {}
+              }
+              public function shutdown():Void {}
           }
           EOF
 
