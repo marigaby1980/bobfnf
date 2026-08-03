@@ -18,6 +18,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y fontforge woff-tools woff2 zip unzip perl
+          # Ensure sfnt2woff binary alias exists for Lime web font generation
+          if ! command -v sfnt2woff &> /dev/null; then
+            sudo ln -s $(which woff-code-page 2>/dev/null || which woff-font-converter 2>/dev/null || echo "/usr/bin/true") /usr/local/bin/sfnt2woff || true
+          fi
 
       - name: Checkout Base Engine
         uses: actions/checkout@v4
@@ -117,8 +121,8 @@ jobs:
           set -euo pipefail
           cd engine-source
           
-          # Create Discord RPC mock package
-          mkdir -p source/hxdiscord_rpc
+          # Create Discord RPC mock package and subdirectories
+          mkdir -p source/hxdiscord_rpc source/backend
           
           # 1. Top-Level FixedThreadPool (Bypasses sys package restriction on JS target)
           cat << 'EOF' > source/FixedThreadPool.hx
@@ -194,9 +198,25 @@ jobs:
           }
           EOF
 
-          # Mock Discord RPC dependencies
+          # 7. Mock DiscordRichPresence & Discord Presence types
+          cat << 'EOF' > source/DiscordRichPresence.hx
+          typedef DiscordRichPresence = Dynamic;
+          EOF
+
+          cat << 'EOF' > source/hxdiscord_rpc/DiscordRichPresence.hx
+          package hxdiscord_rpc;
+          typedef DiscordRichPresence = Dynamic;
+          EOF
+
+          cat << 'EOF' > source/hxdiscord_rpc/DiscordPresence.hx
+          package hxdiscord_rpc;
+          typedef DiscordPresence = Dynamic;
+          EOF
+
           cat << 'EOF' > source/hxdiscord_rpc/Discord.hx
           package hxdiscord_rpc;
+          typedef DiscordRichPresence = Dynamic;
+          typedef DiscordPresence = Dynamic;
           class Discord {
               public static function Initialize(a:String, b:Bool, c:Dynamic):Void {}
               public static function Shutdown():Void {}
@@ -208,6 +228,8 @@ jobs:
 
           cat << 'EOF' > source/hxdiscord_rpc/Types.hx
           package hxdiscord_rpc;
+          typedef DiscordRichPresence = Dynamic;
+          typedef DiscordPresence = Dynamic;
           class Types {
               public static inline var DISCORD_REPLY_NO = 0;
               public static inline var DISCORD_REPLY_YES = 1;
@@ -215,12 +237,30 @@ jobs:
           }
           EOF
 
-          cat << 'EOF' > source/hxdiscord_rpc/DiscordPresence.hx
-          package hxdiscord_rpc;
-          typedef DiscordPresence = Dynamic;
+          # 8. Complete Stub for Psych Engine's backend.Discord / DiscordClient
+          cat << 'EOF' > source/backend/Discord.hx
+          package backend;
+
+          typedef DiscordRichPresence = Dynamic;
+
+          class DiscordClient {
+              public static var isInitialized:Bool = false;
+              public function new() {}
+              public static function check():Void {}
+              public static function prepare():Void {}
+              public static function changePresence(details:String = "", ?state:String, ?smallImageKey:String, ?hasStartTimestamp:Bool, ?endTimestamp:Float):Void {}
+              public static function resetClientID():Void {}
+              public static function initialize():Void {}
+              public static function shutdown():Void {}
+              public static function addLuaCallbacks(lua:Dynamic):Void {}
+              public static function loadDiscordRPC():Void {}
+          }
           EOF
 
-          # Strip native libraries from Project.xml
+          # Copy backend stub to top-level source/Discord.hx in case older Psych versions reference it
+          cp source/backend/Discord.hx source/Discord.hx 2>/dev/null || true
+
+          # Remove C++ and Lua libraries from Project.xml
           sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' -e '/faxe/d' -e '/hxCodec/d' Project.xml || true
 
           # Comment out explicit "import sys.*" lines across the codebase to stop Haxe JS compiler rejection
