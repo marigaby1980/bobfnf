@@ -1,4 +1,4 @@
-name: Build FNF Web Port
+name: Build Standalone Offline FNF Port
 
 on:
   workflow_dispatch:
@@ -14,10 +14,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Install System Font Generators
+      - name: Install System Dependencies (Font Generators & Build Tools)
         run: |
-          sudo apt-get update && sudo apt-get install -y fontforge woff-tools woff2 zip unzip perl sfnt2woff-zopfli || true
-          for tool in sfnt2woff woff2_compress woff-code-page woff-font-converter; do sudo bash -c "echo -e '#!/bin/bash\nexit 0' > /usr/local/bin/\$tool"; sudo chmod +x /usr/local/bin/\$tool; done
+          sudo apt-get update
+          sudo apt-get install -y fontforge woff-tools woff2 zip unzip perl
+          if ! command -v sfnt2woff &> /dev/null; then
+            sudo ln -s $(which woff-code-page 2>/dev/null || which woff-font-converter 2>/dev/null || echo "/usr/bin/true") /usr/local/bin/sfnt2woff || true
+          fi
 
       - name: Checkout Base Engine
         uses: actions/checkout@v4
@@ -27,6 +30,7 @@ jobs:
 
       - name: Download Mod Payload
         run: |
+          set -euo pipefail
           echo "Downloading mod from URL provided..."
           pip install gdown --quiet
           
@@ -47,87 +51,456 @@ jobs:
         run: |
           cd engine-source
           mkdir -p mods assets
-          cp -rn ../mods_upload/* mods/ || true
-          cp -rn ../mods_upload/* assets/ || true
+          
+          # Handle nested zip folders by copying top level and nested folders
+          cp -rn ../mods_upload/* mods/ 2>/dev/null || true
+          cp -rn ../mods_upload/* assets/ 2>/dev/null || true
+          
+          # If extracted folder has an inner folder, copy its contents too
+          find ../mods_upload -mindepth 1 -maxdepth 2 -type d -exec cp -rn {}/. mods/ \; 2>/dev/null || true
 
       - name: Setup Haxe
         uses: krdlab/setup-haxe@v1
         with:
           haxe-version: 4.2.5
 
+      - name: Patch Haxe Standard Library for sys.thread on JS Target
+        run: |
+          # Locate Haxe std directory and override sys/thread target guards
+          HAXE_STD_DIR=$(dirname $(which haxe))/../std
+          if [ -d "$HAXE_STD_DIR/sys/thread" ]; then
+            echo "Patching Haxe Stdlib sys.thread target guard at $HAXE_STD_DIR/sys/thread..."
+            
+            cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/Thread.hx"
+package sys.thread;
+class Thread {
+    public static function create(f:Void->Void):Void { f(); }
+    public static function readMessage(block:Bool):Dynamic return null;
+    public static function sendMessage(msg:Dynamic):Void {}
+    public static function current():Thread return new Thread();
+}
+EOF
+
+            cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/FixedThreadPool.hx"
+package sys.thread;
+class FixedThreadPool {
+    public var tasksCount(default, null):Int = 0;
+    public function new(numThreads:Int) {}
+    public function run(task:Void->Void):Void {
+        tasksCount++;
+        try { task(); } catch(e:Dynamic) {}
+        tasksCount--;
+    }
+    public function shutdown():Void {}
+}
+EOF
+
+            cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/ElasticThreadPool.hx"
+package sys.thread;
+class ElasticThreadPool {
+    public function new(maxThreads:Int, timeoutSeconds:Float) {}
+    public function run(task:Void->Void):Void {
+        try { task(); } catch(e:Dynamic) {}
+    }
+    public function shutdown():Void {}
+}
+EOF
+
+            cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/Mutex.hx"
+package sys.thread;
+class Mutex {
+    public function new() {}
+    public function acquire():Void {}
+    public function release():Void {}
+}
+EOF
+
+            cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/Deque.hx"
+package sys.thread;
+class Deque<T> {
+    var q:Array<T> = [];
+    public function new() {}
+    public function add(i:T):Void { q.push(i); }
+    public function push(i:T):Void { q.unshift(i); }
+    public function pop(block:Bool):T return q.shift();
+}
+EOF
+          fi
+
       - name: Install Haxelibs and Dependencies
         run: |
+          set -euo pipefail
           cd engine-source
-          haxelib setup ~/haxelib
-          haxelib install hmm --quiet || true
-          haxelib run hmm install --quiet || true
-          haxelib install lime 8.0.1 --quiet || haxelib install lime --quiet
-          haxelib install openfl 9.3.3 --quiet || haxelib install openfl --quiet
-          haxelib install flixel 5.6.1 --quiet || haxelib install flixel --quiet
-          haxelib install flixel-addons 3.2.2 --quiet || haxelib install flixel-addons --quiet
-          haxelib install flixel-ui 2.5.0 --quiet || haxelib install flixel-ui --quiet
-          haxelib install tjson 1.4.0 --quiet || haxelib install tjson --quiet
-          haxelib install flxanimate 3.0.4 --quiet || haxelib install flxanimate --quiet
-          haxelib install hscript --quiet || true
-          haxelib run lime setup --quiet || true
-          haxelib run lime setup flixel --quiet || true
 
-      - name: Patch HTML5 incompatible code (Mock Sys)
+          echo "=== SYSTEM DIAGNOSTICS ==="
+          haxe -version || true
+          node -v || true
+
+          haxelib setup ~/haxelib
+          echo "=== HAXELIB CONFIG ==="
+          haxelib config
+
+          # Optional Haxe Package Manager check
+          if [ -f "hmm.json" ]; then
+            echo "Found hmm.json, installing hmm..."
+            haxelib install hmm || true
+            haxelib run hmm install || true
+          else
+            echo "No hmm.json found in repository root. Skipping hmm."
+          fi
+
+          # Install pinned base dependencies required by Psych Engine
+          echo "Installing Lime and OpenFL..."
+          haxelib install lime 8.0.1 || haxelib install lime
+          haxelib install openfl 9.3.3 || haxelib install openfl
+
+          # Pin flixel to exact version required by engine (5.6.1)
+          echo "Installing pinned Flixel 5.6.1..."
+          haxelib install flixel 5.6.1 || haxelib git flixel https://github.com/HaxeFlixel/flixel.git 5.6.1
+
+          # Pin flixel-addons to exact version required by Project.xml (3.2.2)
+          echo "Installing pinned flixel-addons 3.2.2..."
+          haxelib install flixel-addons 3.2.2 || haxelib git flixel-addons https://github.com/HaxeFlixel/flixel-addons.git 3.2.2 || haxelib install flixel-addons
+
+          # Install required JSON, Animation & scripting dependencies
+          echo "Installing tjson, flxanimate, and scripting libraries..."
+          haxelib install tjson 1.4.0 || haxelib install tjson
+          haxelib install flxanimate 3.0.4 || haxelib install flxanimate || haxelib git flxanimate https://github.com/DotNetSonic/flxanimate.git
+          haxelib install flixel-ui 2.5.0 || haxelib install flixel-ui
+          haxelib install hscript || haxelib install hscript-iris || true
+          haxelib install SScript || true
+          haxelib install hxAnimate || true
+
+          # Configure Lime & Flixel environments
+          haxelib run lime setup
+          haxelib run lime setup flixel
+
+          echo "=== INSTALLED HAXELIB LIST ==="
+          haxelib list
+
+      - name: Patch HTML5 Incompatible Code & Inject Target-Specific Stubs
         run: |
+          set -euo pipefail
           cd engine-source
-          echo 'class FileSystem { public static function absolutePath(path:String) return path; public static function exists(path:String) return false; public static function readDirectory(path:String):Array<String> return []; public static function isDirectory(path:String) return false; public static function stat(path:String) return null; public static function fullPath(path:String) return path; public static function createDirectory(path:String) {} public static function deleteFile(path:String) {} public static function deleteDirectory(path:String) {} }' > source/FileSystem.hx
-          echo 'class File { public static function getContent(path:String) return ""; public static function getBytes(path:String) return null; public static function saveContent(path:String, c:String) return; public static function saveBytes(path:String, b:Dynamic) return; public static function copy(s:String, d:String) {} }' > source/File.hx
-          echo 'class Sys { public static function exit(code:Int) {} public static function sleep(t:Float) {} public static function command(c:String, ?a:Array<String>) return 0; public static function args():Array<String> return []; public static function getCwd() return ""; public static function setCwd(s:String) {} public static function print(v:Dynamic) {} public static function println(v:Dynamic) {} public static function environment() return new haxe.ds.StringMap<String>(); public static function getEnv(s:String) return ""; public static function programPath() return ""; public static function systemName() return "HTML5"; public static function time() return Date.now().getTime() / 1000; }' > source/Sys.hx
-          echo 'class Process { public var stdout:Dynamic; public var stderr:Dynamic; public function new(c:String, ?a:Dynamic) { stdout = { readAll: function() return { toString: function() return "" }, readLine: function() return "" }; stderr = stdout; } public function exitCode(b:Bool=true) return 0; public function close() {} }' > source/Process.hx
-          echo 'class Thread { public static function create(f:Void->Void) { f(); } public static function readMessage(b:Bool) return null; public static function sendMessage(m:Dynamic) {} public static function current() return new Thread(); }' > source/Thread.hx
-          echo 'class Mutex { public function new() {} public function acquire() {} public function release() {} }' > source/Mutex.hx
-          echo 'class FixedThreadPool { public var tasksCount(default, null):Int = 0; public function new(n:Int) {} public function run(f:Void->Void) { tasksCount++; try { f(); } catch(e:Dynamic) {} tasksCount--; } public function shutdown() {} }' > source/FixedThreadPool.hx
-          echo 'class ElasticThreadPool { public function new(m:Int, t:Float) {} public function run(f:Void->Void) { try { f(); } catch(e:Dynamic) {} } public function shutdown() {} }' > source/ElasticThreadPool.hx
-          echo 'class Deque<T> { var q:Array<T> = []; public function new() {} public function add(i:T) q.push(i); public function push(i:T) q.unshift(i); public function pop(b:Bool):T return q.shift(); }' > source/Deque.hx
           
-          sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' -e '/faxe/d' -e '/hxCodec/d' Project.xml || true
+          # Create Discord RPC mock package and subdirectories
           mkdir -p source/hxdiscord_rpc source/backend
           
-          echo 'package hxdiscord_rpc; class Discord { public static function Initialize(a:String,b:Bool,c:Dynamic){} public static function Shutdown(){} public static function RunCallbacks(){} public static function UpdatePresence(a:Dynamic){} public static function ClearPresence(){} }' > source/hxdiscord_rpc/Discord.hx
-          echo 'package hxdiscord_rpc; class Types { public static inline var DISCORD_REPLY_NO=0; public static inline var DISCORD_REPLY_YES=1; public static inline var DISCORD_REPLY_IGNORE=2; }' > source/hxdiscord_rpc/Types.hx
-          echo 'package hxdiscord_rpc; typedef DiscordPresence = Dynamic; typedef DiscordRichPresence = Dynamic;' > source/hxdiscord_rpc/DiscordPresence.hx
-          echo 'package backend; typedef DiscordRichPresence = Dynamic; class DiscordClient { public static var isInitialized:Bool = false; public function new() {} public static function check() {} public static function prepare() {} public static function changePresence(?a:String, ?b:String, ?c:String, ?d:Bool, ?e:Float) {} public static function resetClientID() {} public static function initialize() {} public static function shutdown() {} public static function addLuaCallbacks(l:Dynamic) {} public static function loadDiscordRPC() {} }' > source/backend/Discord.hx
+          # 1. Top-Level ThreadPool Stubs for JS target
+          cat << 'EOF' > source/FixedThreadPool.hx
+class FixedThreadPool {
+    public var tasksCount(default, null):Int = 0;
+    public function new(numThreads:Int) {}
+    public function run(task:Void->Void):Void {
+        tasksCount++;
+        try { task(); } catch(e:Dynamic) {}
+        tasksCount--;
+    }
+    public function shutdown():Void {}
+}
+EOF
+
+          cat << 'EOF' > source/ElasticThreadPool.hx
+class ElasticThreadPool {
+    public function new(maxThreads:Int, timeoutSeconds:Float) {}
+    public function run(task:Void->Void):Void {
+        try { task(); } catch(e:Dynamic) {}
+    }
+    public function shutdown():Void {}
+}
+EOF
+
+          cat << 'EOF' > source/Thread.hx
+class Thread {
+    public static function create(f:Void->Void):Void { f(); }
+    public static function readMessage(block:Bool):Dynamic return null;
+    public static function sendMessage(msg:Dynamic):Void {}
+    public static function current():Thread return new Thread();
+}
+EOF
+
+          cat << 'EOF' > source/Mutex.hx
+class Mutex {
+    public function new() {}
+    public function acquire():Void {}
+    public function release():Void {}
+}
+EOF
+
+          cat << 'EOF' > source/Deque.hx
+class Deque<T> {
+    var q:Array<T> = [];
+    public function new() {}
+    public function add(i:T):Void { q.push(i); }
+    public function push(i:T):Void { q.unshift(i); }
+    public function pop(block:Bool):T return q.shift();
+}
+EOF
+
+          cat << 'EOF' > source/Sys.hx
+class Sys {
+    public static function exit(code:Int):Void {}
+    public static function sleep(t:Float):Void {}
+    public static function command(cmd:String, ?args:Array<String>):Int return 0;
+    public static function args():Array<String> return [];
+    public static function getCwd():String return "";
+    public static function setCwd(s:String):Void {}
+    public static function print(v:Dynamic):Void {}
+    public static function println(v:Dynamic):Void {}
+    public static function environment():Map<String,String> return new Map<String,String>();
+    public static function getEnv(s:String):String return "";
+    public static function programPath():String return "";
+    public static function systemName():String return "HTML5";
+    public static function time():Float return Date.now().getTime() / 1000;
+}
+EOF
+
+          # 2. Mock Discord RPC Types & Stubs
+          cat << 'EOF' > source/DiscordRichPresence.hx
+typedef DiscordRichPresence = Dynamic;
+EOF
+
+          cat << 'EOF' > source/hxdiscord_rpc/DiscordRichPresence.hx
+package hxdiscord_rpc;
+typedef DiscordRichPresence = Dynamic;
+EOF
+
+          cat << 'EOF' > source/hxdiscord_rpc/DiscordPresence.hx
+package hxdiscord_rpc;
+typedef DiscordPresence = Dynamic;
+EOF
+
+          cat << 'EOF' > source/hxdiscord_rpc/Discord.hx
+package hxdiscord_rpc;
+typedef DiscordRichPresence = Dynamic;
+typedef DiscordPresence = Dynamic;
+class Discord {
+    public static function Initialize(a:String, b:Bool, c:Dynamic):Void {}
+    public static function Shutdown():Void {}
+    public static function RunCallbacks():Void {}
+    public static function UpdatePresence(a:Dynamic):Void {}
+    public static function ClearPresence():Void {}
+}
+EOF
+
+          cat << 'EOF' > source/hxdiscord_rpc/Types.hx
+package hxdiscord_rpc;
+typedef DiscordRichPresence = Dynamic;
+typedef DiscordPresence = Dynamic;
+class Types {
+    public static inline var DISCORD_REPLY_NO = 0;
+    public static inline var DISCORD_REPLY_YES = 1;
+    public static inline var DISCORD_REPLY_IGNORE = 2;
+}
+EOF
+
+          cat << 'EOF' > source/backend/Discord.hx
+package backend;
+
+typedef DiscordRichPresence = Dynamic;
+
+class DiscordClient {
+    public static var isInitialized:Bool = false;
+    public function new() {}
+    public static function check():Void {}
+    public static function prepare():Void {}
+    public static function changePresence(details:String = "", ?state:String, ?smallImageKey:String, ?hasStartTimestamp:Bool, ?endTimestamp:Float):Void {}
+    public static function resetClientID():Void {}
+    public static function initialize():Void {}
+    public static function shutdown():Void {}
+    public static function addLuaCallbacks(lua:Dynamic):Void {}
+    public static function loadDiscordRPC():Void {}
+}
+EOF
+
           cp source/backend/Discord.hx source/Discord.hx 2>/dev/null || true
 
-          find source -name "*.hx" -type f -exec sed -i -e 's/sys\.FileSystem/FileSystem/g' -e 's/sys\.io\.File/File/g' -e 's/sys\.io\.Process/Process/g' -e 's/sys\.thread\.Thread/Thread/g' -e 's/sys\.thread\.Mutex/Mutex/g' -e 's/sys\.thread\.FixedThreadPool/FixedThreadPool/g' -e 's/sys\.thread\.ElasticThreadPool/ElasticThreadPool/g' -e 's/sys\.thread\.Deque/Deque/g' -e '/import cpp/d' -e '/import llua/d' {} +
-          find source -name "import.hx" -type f -exec sed -i 's/import sys\.thread\./\/\/ import sys.thread./g' {} +
-          find . -name "FlxSoundTray.hx" -type f -exec sed -i 's/public function new(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\n&/g' {} +
+          # Remove desktop/C++ native libraries from Project.xml
+          sed -i -e '/discord_rpc/d' -e '/discord-rpc/d' -e '/linc_luajit/d' -e '/faxe/d' -e '/hxCodec/d' Project.xml || true
 
-      - name: Optimization & Web Compile Build
+          # 3. Targeted Fix for import.hx to disable sys.thread global imports on HTML5
+          find source -name "import.hx" -type f -exec sed -i 's/import sys\.thread\./\/\/ import sys.thread./g' {} +
+
+          # 4. FlxSoundTray constructor patch
+          find . -name "FlxSoundTray.hx" -type f -print0 | xargs -0 -r -n1 perl -0777 -i -pe \
+            "s/public function new\(/public function showIncrement() { show(); } public function showDecrement() { show(); }\n\npublic function new(/s"
+
+      - name: Print Build Environment & Project Configuration
         run: |
           cd engine-source
-          haxelib run lime build html5 -release -D DISCORD_DISABLE -D LUA_DISABLED -D VIDMOD_ENABLED=false -D NO_PRELOAD_ALL -D suppress-warnings
+          echo "=== PROJECT.XML HEAD ==="
+          head -n 50 Project.xml
 
-      - name: Bundle into Standalone Offline HTML File
+      - name: Web Compile Build
         run: |
+          set -euo pipefail
+          cd engine-source
+          haxelib run lime build html5 -release -D DISCORD_DISABLE -D LUA_DISABLED -D VIDMOD_ENABLED=false
+
+      - name: Bundle into Single Offline Standalone HTML File
+        run: |
+          set -euo pipefail
           cd engine-source/export/release/html5/bin
           
-          node -e "
-          const fs = require('fs');
-          const path = require('path');
-          const mime = { '.png':'image/png', '.jpg':'image/jpeg', '.gif':'image/gif', '.ogg':'audio/ogg', '.mp3':'audio/mpeg', '.wav':'audio/wav', '.json':'application/json', '.xml':'text/xml', '.txt':'text/plain', '.ttf':'font/ttf', '.woff':'font/woff', '.woff2':'font/woff2' };
-          function getFiles(dir, list = []) { fs.readdirSync(dir).forEach(f => { let p = path.join(dir, f); fs.statSync(p).isDirectory() ? getFiles(p, list) : list.push(p); }); return list; }
-          let base = process.cwd();
-          let vfs = {}, js = [];
-          getFiles(base).forEach(f => {
-            let rel = path.relative(base, f).replace(/\\\\/g, '/');
-            if (rel === 'index.html' || rel === 'standalone.html') return;
-            if (rel.endsWith('.js')) js.push(fs.readFileSync(f, 'utf8'));
-            else vfs[rel] = 'data:' + (mime[path.extname(f).toLowerCase()] || 'application/octet-stream') + ';base64,' + fs.readFileSync(f).toString('base64');
-          });
-          let html = '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>FNF Offline Port</title><style>body,html{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}#openfl-content{width:100%;height:100%}</style><script>window.__VFS__=' + JSON.stringify(vfs) + ';(function(){let oO=XMLHttpRequest.prototype.open,oS=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.open=function(m,u){this._u=u.replace(/^[./]+/, \"\");return oO.apply(this,arguments);};XMLHttpRequest.prototype.send=function(d){let k=Object.keys(window.__VFS__).find(x=>this._u&&(this._u.endsWith(x)||x.endsWith(this._u)));if(k&&window.__VFS__[k]){let uri=window.__VFS__[k];Object.defineProperty(this,\"responseURL\",{value:uri});if(uri.startsWith(\"data:application/json\")||uri.startsWith(\"data:text/\")){let dec=atob(uri.split(\",\")[1]);Object.defineProperty(this,\"responseText\",{value:dec});Object.defineProperty(this,\"response\",{value:dec});}setTimeout(()=>{Object.defineProperty(this,\"status\",{value:200});Object.defineProperty(this,\"readyState\",{value:4});if(this.onreadystatechange)this.onreadystatechange();if(this.onload)this.onload();},1);return;}return oS.apply(this,arguments);};})();let oI=window.Image;window.Image=function(){let i=new oI(),s=Object.getOwnPropertyDescriptor(HTMLImageElement.prototype,\"src\").set;Object.defineProperty(i,\"src\",{set:function(u){let k=Object.keys(window.__VFS__).find(x=>u&&(u.endsWith(x)||x.endsWith(u)));s.call(this,k&&window.__VFS__[k]?window.__VFS__[k]:u);}});return i;};</script></head><body><div id=\"openfl-content\"></div><script>' + js.join('\n;\n') + '</script></body></html>';
-          fs.writeFileSync('standalone.html', html);
-          "
-          
-          cp standalone.html index.html
-          zip -r ../../../../../web_export.zip *
+          if [ ! -f "index.html" ]; then
+            echo "Error: index.html not found in build output directory."
+            ls -la
+            exit 1
+          fi
 
-      - name: Upload Single Offline HTML Artifact
+          # Node script to inline all JS scripts, sound files, images, fonts, and assets into 1 HTML file
+          cat << 'EOF' > inline_bundler.js
+const fs = require('fs');
+const path = require('path');
+
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const map = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.ogg': 'audio/ogg',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.json': 'application/json',
+    '.xml': 'text/xml',
+    '.txt': 'text/plain',
+    '.ttf': 'font/ttf',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2'
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+function getAllFiles(dir, fileList = []) {
+  const files = fs.readdirSync(dir);
+  files.forEach(file => {
+    const filePath = path.join(dir, file);
+    if (fs.statSync(filePath).isDirectory()) {
+      getAllFiles(filePath, fileList);
+    } else {
+      fileList.push(filePath);
+    }
+  });
+  return fileList;
+}
+
+const baseDir = process.cwd();
+const allFiles = getAllFiles(baseDir);
+
+const virtualFS = {};
+let jsScripts = [];
+
+allFiles.forEach(file => {
+  const relativePath = path.relative(baseDir, file).replace(/\\/g, '/');
+  
+  if (relativePath === 'index.html' || relativePath === 'inline_bundler.js' || relativePath === 'standalone.html') return;
+
+  if (relativePath.endsWith('.js')) {
+    jsScripts.push(fs.readFileSync(file, 'utf8'));
+  } else {
+    const mime = getMimeType(file);
+    const base64 = fs.readFileSync(file).toString('base64');
+    virtualFS[relativePath] = `data:${mime};base64,${base64}`;
+  }
+});
+
+const standaloneHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>FNF Offline Standalone Build</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+        }
+        #openfl-content {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+    <script>
+        // Virtual File System for Offline Interception
+        window.__VFS__ = ${JSON.stringify(virtualFS)};
+
+        // Hook XMLHttpRequest for offline data URI serving
+        (function() {
+            const origOpen = XMLHttpRequest.prototype.open;
+            const origSend = XMLHttpRequest.prototype.send;
+
+            XMLHttpRequest.prototype.open = function(method, url, async, user, pass) {
+                this._url = url.replace(/^[./]+/, '');
+                return origOpen.apply(this, arguments);
+            };
+
+            XMLHttpRequest.prototype.send = function(data) {
+                const cleanUrl = Object.keys(window.__VFS__).find(k => this._url && (this._url.endsWith(k) || k.endsWith(this._url)));
+                if (cleanUrl && window.__VFS__[cleanUrl]) {
+                    const dataUri = window.__VFS__[cleanUrl];
+                    Object.defineProperty(this, 'responseURL', { value: dataUri });
+                    
+                    if (dataUri.startsWith('data:application/json') || dataUri.startsWith('data:text/')) {
+                        const base64Content = dataUri.split(',')[1];
+                        const decoded = atob(base64Content);
+                        Object.defineProperty(this, 'responseText', { value: decoded });
+                        Object.defineProperty(this, 'response', { value: decoded });
+                    }
+                    
+                    setTimeout(() => {
+                        Object.defineProperty(this, 'status', { value: 200 });
+                        Object.defineProperty(this, 'readyState', { value: 4 });
+                        if (typeof this.onreadystatechange === 'function') this.onreadystatechange();
+                        if (typeof this.onload === 'function') this.onload();
+                    }, 1);
+                    return;
+                }
+                return origSend.apply(this, arguments);
+            };
+        })();
+
+        // Intercept Image elements for offline embedded resources
+        const origImage = window.Image;
+        window.Image = function() {
+            const img = new origImage();
+            const origSrcSetter = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src').set;
+            Object.defineProperty(img, 'src', {
+                set: function(url) {
+                    const cleanUrl = Object.keys(window.__VFS__).find(k => url && (url.endsWith(k) || k.endsWith(url)));
+                    if (cleanUrl && window.__VFS__[cleanUrl]) {
+                        origSrcSetter.call(this, window.__VFS__[cleanUrl]);
+                    } else {
+                        origSrcSetter.call(this, url);
+                    }
+                }
+            });
+            return img;
+        };
+    </script>
+</head>
+<body>
+    <div id="openfl-content"></div>
+    <script>
+        ${jsScripts.join('\n;\n')}
+    </script>
+</body>
+</html>`;
+
+fs.writeFileSync('standalone.html', standaloneHTML);
+console.log('Successfully bundled standalone offline game into standalone.html');
+EOF
+
+          node inline_bundler.js
+          cp standalone.html index.html
+
+      - name: Upload Single Standalone Offline HTML File
         uses: actions/upload-artifact@v4
         with:
           name: standalone-offline-game
@@ -135,6 +508,7 @@ jobs:
 
       - name: Auto-Publish to GitHub Branch
         run: |
+          set -euo pipefail
           cd engine-source/export/release/html5/bin
           mkdir -p deploy
           cp standalone.html deploy/index.html
@@ -145,4 +519,3 @@ jobs:
           git add index.html
           git commit -m "Automated Single-File Offline Web Port"
           git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:web-build
-
