@@ -79,7 +79,7 @@ jobs:
                 public static function sendMessage(msg:Dynamic):Void {}
                 public static function current():Thread return new Thread();
             }
-            EOF
+EOF
 
             cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/FixedThreadPool.hx"
             package sys.thread;
@@ -93,7 +93,7 @@ jobs:
                 }
                 public function shutdown():Void {}
             }
-            EOF
+EOF
 
             cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/ElasticThreadPool.hx"
             package sys.thread;
@@ -104,7 +104,7 @@ jobs:
                 }
                 public function shutdown():Void {}
             }
-            EOF
+EOF
 
             cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/Mutex.hx"
             package sys.thread;
@@ -113,7 +113,7 @@ jobs:
                 public function acquire():Void {}
                 public function release():Void {}
             }
-            EOF
+EOF
 
             cat << 'EOF' > "$HAXE_STD_DIR/sys/thread/Deque.hx"
             package sys.thread;
@@ -124,7 +124,7 @@ jobs:
                 public function push(i:T):Void { q.unshift(i); }
                 public function pop(block:Bool):T return q.shift();
             }
-            EOF
+EOF
           fi
 
       - name: Install Haxelibs and Dependencies
@@ -198,7 +198,7 @@ jobs:
               }
               public function shutdown():Void {}
           }
-          EOF
+EOF
 
           cat << 'EOF' > source/ElasticThreadPool.hx
           class ElasticThreadPool {
@@ -208,7 +208,7 @@ jobs:
               }
               public function shutdown():Void {}
           }
-          EOF
+EOF
 
           cat << 'EOF' > source/Thread.hx
           class Thread {
@@ -217,7 +217,7 @@ jobs:
               public static function sendMessage(msg:Dynamic):Void {}
               public static function current():Thread return new Thread();
           }
-          EOF
+EOF
 
           cat << 'EOF' > source/Mutex.hx
           class Mutex {
@@ -225,7 +225,7 @@ jobs:
               public function acquire():Void {}
               public function release():Void {}
           }
-          EOF
+EOF
 
           cat << 'EOF' > source/Deque.hx
           class Deque<T> {
@@ -235,7 +235,7 @@ jobs:
               public function push(i:T):Void { q.unshift(i); }
               public function pop(block:Bool):T return q.shift();
           }
-          EOF
+EOF
 
           cat << 'EOF' > source/Sys.hx
           class Sys {
@@ -253,22 +253,22 @@ jobs:
               public static function systemName():String return "HTML5";
               public static function time():Float return Date.now().getTime() / 1000;
           }
-          EOF
+EOF
 
           # 2. Mock Discord RPC Types & Stubs
           cat << 'EOF' > source/DiscordRichPresence.hx
           typedef DiscordRichPresence = Dynamic;
-          EOF
+EOF
 
           cat << 'EOF' > source/hxdiscord_rpc/DiscordRichPresence.hx
           package hxdiscord_rpc;
           typedef DiscordRichPresence = Dynamic;
-          EOF
+EOF
 
           cat << 'EOF' > source/hxdiscord_rpc/DiscordPresence.hx
           package hxdiscord_rpc;
           typedef DiscordPresence = Dynamic;
-          EOF
+EOF
 
           cat << 'EOF' > source/hxdiscord_rpc/Discord.hx
           package hxdiscord_rpc;
@@ -281,7 +281,7 @@ jobs:
               public static function UpdatePresence(a:Dynamic):Void {}
               public static function ClearPresence():Void {}
           }
-          EOF
+EOF
 
           cat << 'EOF' > source/hxdiscord_rpc/Types.hx
           package hxdiscord_rpc;
@@ -292,7 +292,7 @@ jobs:
               public static inline var DISCORD_REPLY_YES = 1;
               public static inline var DISCORD_REPLY_IGNORE = 2;
           }
-          EOF
+EOF
 
           cat << 'EOF' > source/backend/Discord.hx
           package backend;
@@ -311,7 +311,7 @@ jobs:
               public static function addLuaCallbacks(lua:Dynamic):Void {}
               public static function loadDiscordRPC():Void {}
           }
-          EOF
+EOF
 
           cp source/backend/Discord.hx source/Discord.hx 2>/dev/null || true
 
@@ -495,7 +495,7 @@ jobs:
 
           fs.writeFileSync('standalone.html', standaloneHTML);
           console.log('Successfully bundled standalone offline game into standalone.html');
-          EOF
+EOF
 
           node inline_bundler.js
           cp standalone.html index.html
